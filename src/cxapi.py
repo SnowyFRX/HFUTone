@@ -388,17 +388,38 @@ class Cx:
             if not isinstance(ch, dict):
                 continue
             content = ch.get('content') or {}
-            course = content.get('course') or {}
-            if not course:
-                continue
             if content.get('state') in (0, False, '0'):
                 continue
+            # course 有两种形态：旧版是扁平 dict（id/clazzid/name），新版包了一层
+            # {"data": [{...}]}。商益学这类走新版，按老结构取字段会全空，
+            # 导致活动请求带着空 courseId 打出去直接 500，签到自然检测不到。
+            course = content.get('course') or {}
+            data = course.get('data')
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                c0 = data[0]
+                course_id = c0.get('id')
+                class_id = ch.get('id') or c0.get('classId') or content.get('id')
+                name = c0.get('name')
+            else:
+                course_id = course.get('id')
+                class_id = course.get('clazzid') or content.get('id')
+                name = course.get('name')
+            cpi = content.get('cpi') or ch.get('cpi') or content.get('personid')
+            if not course_id:
+                continue
+            # 老师名在新版里是 course.data[0].teacherfactor，旧版是 teacher.name
+            teacher = ''
+            if isinstance(data, list) and data:
+                teacher = str((data[0] or {}).get('teacherfactor') or '')
+            else:
+                t = content.get('teacher')
+                teacher = str((t or {}).get('name') or '') if isinstance(t, dict) else ''
             out.append({
-                'courseId': str(course.get('id') or ''),
-                'classId': str(course.get('clazzid') or ''),
-                'cpi': str(content.get('personid') or ''),
-                'name': str(course.get('name') or ''),
-                'teacher': str((content.get('teacher') or {}).get('name') or ''),
+                'courseId': str(course_id),
+                'classId': str(class_id or ''),
+                'cpi': str(cpi or ''),
+                'name': str(name or content.get('name') or ''),
+                'teacher': teacher,
             })
         return out
 
@@ -892,18 +913,11 @@ def upload_image(cx: Cx, url_or_path: str, tag: str = 'img') -> tuple[str, str]:
                              extra_headers=cx.headers, timeout=30, tag='cx-dl')
             if r.status != 200 or not r.body:
                 return '', f'下载图片失败（HTTP {r.status}）'
-            # curl 用 text=True 收的，二进制会被替换符污染，这里退回重下一次
             fd, tmp_path = tempfile.mkstemp(suffix='.jpg')
             os.close(fd)
-            args = [core.curl_path(), '-s', '--max-time', '30',
-                    '-o', tmp_path, url_or_path]
-            if cx.cookie:
-                args += ['-H', f'Cookie: {cx.cookie}']
-            for k, v in cx.headers.items():
-                args += ['-H', f'{k}: {v}']
-            sub = core.subprocess.run(args, capture_output=True,
-                                      timeout=45, creationflags=core._NO_WINDOW)
-            if sub.returncode != 0 or not os.path.getsize(tmp_path):
+            if not core.fetch_bytes(url_or_path, cookie=cx.cookie,
+                                    headers=cx.headers, timeout=30,
+                                    out_path=tmp_path):
                 return '', '下载图片失败'
             src = tmp_path
         else:
