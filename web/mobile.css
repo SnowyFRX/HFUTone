@@ -372,9 +372,15 @@ body.is-android .side:not(.is-open) {
   pointer-events: auto !important;
 }
 
-/* 顶栏按钮在 Android 上只剩三个，摊成一排更好按 */
+/* 顶栏按钮在 Android 上只剩两个，摊成一排更好按 */
 body.is-android .head-actions button {
   flex: 1 1 30%;
+}
+
+/* 「账号」填的是直播课堂（CAS）的学号和密码。Android 上直播课表整块撤掉了，
+   这个入口点进去只会让人以为哪儿没配好。要改雨课堂/学习通凭据就在各自面板里。 */
+body.is-android #btnAccount {
+  display: none !important;
 }
 
 /* 设置里「自动推流」「拉取的流」两组只对桌面播放链路有意义，
