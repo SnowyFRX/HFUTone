@@ -54,6 +54,11 @@ class CxSigner:
         # 位置签到的默认坐标，由 server 从设置里灌进来。
         # 放在这里而不是让前端每次传：5 秒窗口里没人来得及输坐标。
         self.default_location: dict = {}
+        # 手动加课：课程中心没收录但老师在上课的课（如商益学）。
+        # 由 server 从设置灌进来，scan 时和 backclazzdata 的课合并。
+        self.extra_courses: list[dict] = []
+        # cpi 现查缓存：courseId|classId -> cpi
+        self._cpi_cache: dict[str, str] = {}
 
     # -- 账号 --------------------------------------------------------------
 
@@ -79,6 +84,24 @@ class CxSigner:
             return self._snapshot()
 
         courses = self.api.courses()
+        # 合并手动加课：课程中心没收录、但老师在上课的课（如商益学"乐"）。
+        for ec in self.extra_courses:
+            cid = str(ec.get('courseId') or '')
+            lid = str(ec.get('classId') or '')
+            if not cid or not lid:
+                continue
+            # 课程中心已有就跳过，避免重扫
+            if any(c['courseId'] == cid and c['classId'] == lid for c in courses):
+                continue
+            cpi = str(ec.get('cpi') or '')
+            if not cpi:
+                cpi = self._lookup_cpi(cid, lid)
+            courses.append({
+                'courseId': cid, 'classId': lid, 'cpi': cpi,
+                'name': str(ec.get('name') or '') or f'{cid}',
+                'teacher': '',
+                'manual': True,
+            })
         if not courses:
             return {'ok': False, 'courses': [], 'signs': [],
                     'error': '没有取到课程（登录可能已失效）'}
@@ -104,6 +127,27 @@ class CxSigner:
     def _snapshot(self) -> dict:
         return {'ok': True, 'courses': list(self._cache.values()),
                 'signs': list(getattr(self, '_last_signs', [])), 'error': ''}
+
+    def _lookup_cpi(self, course_id: str, class_id: str) -> str:
+        """手动加课没填 cpi 时，用 clazzperson 现查一次（结果缓存）。"""
+        key = f'{course_id}|{class_id}'
+        if key in self._cpi_cache:
+            return self._cpi_cache[key]
+        cpi = ''
+        try:
+            data = self.api._get(
+                cx.MOOC_API + '/gas/clazzperson',
+                {'courseid': course_id, 'clazzid': class_id, 'userid': self.api.uid,
+                 'personid': '', 'view': 'json',
+                 'fields': 'clazzid,popupagreement,personid'})
+            d = self.api._json(data)
+            rows = d.get('data') or []
+            if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                cpi = str(rows[0].get('personid') or '')
+        except Exception:                                   # noqa: BLE001
+            cpi = ''
+        self._cpi_cache[key] = cpi
+        return cpi
 
     def _describe(self, course: dict, act: dict) -> dict:
         """把一个活动补成「前端能直接渲染」的样子。"""

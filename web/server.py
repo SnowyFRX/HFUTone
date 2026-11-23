@@ -102,7 +102,8 @@ DEFAULT_SETTINGS = {
     # on-lesson 直接 200，动态码考勤不再要求交码；而且同一套凭据连 web 头也能通。
     # 所以 App 身份就是主形态，"先扫码再 App 头对照"除了多一次失败请求没意义。
     'ykt': {'signMode': 'app'},
-    'cx': {'location': {'address': '', 'lat': 0.0, 'lng': 0.0}},
+    'cx': {'location': {'address': '', 'lat': 0.0, 'lng': 0.0},
+            'extraCourses': []},
 }
 
 YKT_SIGN_MODES = ('app', 'scan', 'both')
@@ -116,6 +117,36 @@ def _clamp(v, lo: float, hi: float) -> float:
     if f != f:                                    # NaN
         return 0.0
     return max(lo, min(hi, f))
+
+
+def _clean_extra_courses(items) -> list:
+    """手动加课：每条形如 {'courseId','classId','cpi','name'}。
+
+    学习通的课程中心（backclazzdata）不收录"老师临时建、未开课"的课
+    （如商益学），但它的签到活动照常在。这类课只能手动把三个 ID
+    填进设置，扫描时合并进去。cpi 可留空——空的话扫描时现查
+    clazzperson 补上（一次查询，结果缓存在 signer）。
+    只留字段非空的合法条目，去重（按 courseId+classId）。
+    """
+    out, seen = [], set()
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        cid = str(it.get('courseId') or '').strip()
+        lid = str(it.get('classId') or '').strip()
+        if not cid or not lid:
+            continue
+        key = (cid, lid)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            'courseId': cid,
+            'classId': lid,
+            'cpi': str(it.get('cpi') or '').strip(),
+            'name': str(it.get('name') or '').strip(),
+        })
+    return out
 
 
 def read_settings() -> dict:
@@ -153,6 +184,9 @@ def read_settings() -> dict:
                     'lat': _clamp(loc.get('lat'), -90, 90),
                     'lng': _clamp(loc.get('lng'), -180, 180),
                 }
+            ec = cx.get('extraCourses')
+            if isinstance(ec, list):
+                blob['cx']['extraCourses'] = _clean_extra_courses(ec)
     return blob
 
 
@@ -189,6 +223,9 @@ def write_settings(patch: dict) -> dict:
                 cur['lat'] = _clamp(loc.get('lat'), -90, 90)
             if loc.get('lng') is not None:
                 cur['lng'] = _clamp(loc.get('lng'), -180, 180)
+            ec = cx.get('extraCourses')
+            if isinstance(ec, list):
+                cfg['cx']['extraCourses'] = _clean_extra_courses(ec)
     try:
         CRED_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
@@ -779,10 +816,16 @@ class CxState:
         loc = read_settings()['cx']['location']
         self.signer.default_location = dict(loc or {})
 
+    def sync_extra_courses(self) -> None:
+        """把设置里的手动加课灌给签到器（课程中心没收录的课，如商益学）。"""
+        self.signer.extra_courses = list(
+            read_settings()['cx']['extraCourses'] or [])
+
     def scan(self, force: bool = True) -> dict:
         with self.lock:
             try:
                 self.sync_location()
+                self.sync_extra_courses()
                 data = self.signer.scan(force=force)
                 self.last_scan = time.time()
                 self.error = '' if data.get('ok') else str(data.get('error') or '')
