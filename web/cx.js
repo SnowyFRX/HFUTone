@@ -95,20 +95,34 @@
       }
     }
     if (count) {
-      var pending = S.signs.filter(function (x) { return !x.signed; }).length;
-      count.textContent = S.signs.length
-        ? (pending ? pending + ' 个待签 / 共 ' + S.signs.length : '全部已签')
-        : '';
+      var live = liveSigns();
+      var pending = live.length;
+      count.textContent = pending
+        ? (pending + ' 个待签')
+        : (S.signs.length ? '全部已签或已截止' : '');
     }
 
     if ($('cxLoginBtn')) { $('cxLoginBtn').hidden = S.loggedIn; }
     if ($('cxLogout')) { $('cxLogout').hidden = !S.loggedIn; }
     if ($('cxScanBtn')) { $('cxScanBtn').disabled = !S.loggedIn || S.busy; }
     if ($('cxSignAll')) {
-      var auto = S.signs.filter(function (x) { return !x.signed && x.canAuto; }).length;
+      var auto = liveSigns().filter(function (x) { return x.canAuto; }).length;
       $('cxSignAll').disabled = !S.loggedIn || S.busy || !auto;
       $('cxSignAll').textContent = auto ? '一键签到（' + auto + '）' : '一键签到';
     }
+  }
+
+  function liveSigns() {
+    // 只留还能签的：已签的排除，过了截止时间（endTime）的排除。
+    // 扫描是一次性的快照，老师在 5 秒窗口里发的签到，等界面渲染出来
+    // 往往就过了截止时间——不在渲染时再判一次，界面就会出现
+    // "已截止却还显示待签"的假象。
+    var now = Date.now();
+    return (S.signs || []).filter(function (x) {
+      if (x.signed) { return false; }
+      if (x.endTime && now > x.endTime) { return false; }
+      return true;
+    });
   }
 
   function paintList() {
@@ -118,14 +132,16 @@
       box.innerHTML = '<p class="ykt-empty">登录后这里会列出进行中的签到。</p>';
       return;
     }
-    if (!S.signs.length) {
+    var rows = liveSigns();
+    if (!rows.length) {
       box.innerHTML = '<p class="ykt-empty">'
-        + (S.loaded ? '当前没有进行中的签到。' : '点「刷新签到」看看有没有。')
+        + (S.loaded ? '当前没有可签的签到。' : '点「刷新签到」看看有没有。')
         + '</p>';
       return;
     }
 
-    box.innerHTML = S.signs.map(function (x, i) {
+    box.innerHTML = rows.map(function (x) {
+      var i = S.signs.indexOf(x);
       var label = TYPE_TEXT[x.signType] || x.signType;
       var stateText, cls;
       if (x.signed) {
@@ -332,7 +348,7 @@
   }
 
   function signAll() {
-    var auto = S.signs.filter(function (x) { return !x.signed && x.canAuto; });
+    var auto = liveSigns().filter(function (x) { return x.canAuto; });
     if (!auto.length) { return; }
     S.busy = true;
     paintState();

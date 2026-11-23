@@ -83,6 +83,16 @@ class CxSigner:
         if not force and now - self._last_scan < ttl and self._cache:
             return self._snapshot()
 
+        # 位置签到要拿 sc/cid 做签名，而它们来自 getUserInfo 的 clientId。
+        # 老登录态（尤其之前 RSA 解包有 bug 时期登录的）里 device 是空的，
+        # 直接签会 500。这里补一次，拿到就落盘，下次不用再补。
+        if not self.api.device.get('sc'):
+            try:
+                self.api.refresh_user()
+                core.log(f'[学习通] 补拉 device: sc={bool(self.api.device.get("sc"))}')
+            except Exception as exc:                        # noqa: BLE001
+                core.log(f'[学习通] 补拉 device 失败: {exc}')
+
         courses = self.api.courses()
         # 合并手动加课：课程中心没收录、但老师在上课的课（如商益学"乐"）。
         for ec in self.extra_courses:
@@ -208,6 +218,7 @@ class CxSigner:
             'desc': act['desc'],
             'url': act['url'],
             'startTime': act['startTime'],
+            'endTime': act.get('endTime') or 0,
             'signType': sign_type,
             'status': status,
             'statusText': cx.STATUS_TEXT.get(status, '未签到' if status == 0 else ''),

@@ -313,11 +313,20 @@ def rsa_decrypt_with_public(cipher_b64: str, public_key_b64: str) -> str:
         c = int.from_bytes(piece, 'big')
         m = pow(c, e, n)
         block = m.to_bytes(key_len, 'big')
-        # 剥 PKCS#1 v1.5：0x00 0x02 ... 0x00 M  或  0x01 ... 0x00 M
-        start = 2 if block[0] == 0x00 else 1
-        if block[start] not in (1, 2):
-            continue
-        sep = block.find(b'\x00', start)
+        # 剥 PKCS#1 v1.5 填充。格式 00 <type> <padding...> 00 <data>：
+        #   type 1 签名填充（padding 全是 0xFF），type 2 加密填充。
+        # type 在 index 1。早先写成 start=2 去检查 block[2]，而那一位
+        # 是 0xFF（=255），于是每个块都被判非法 continue 掉，
+        # clientId 永远解出空串 → device 里没有 sc/cid →
+        # 位置签到提交必然 500。
+        if block[0] == 0x00:
+            if block[1] not in (1, 2):
+                continue
+            sep = block.find(b'\x00', 2)
+        else:
+            if block[0] not in (1, 2):
+                continue
+            sep = block.find(b'\x00', 1)
         if sep < 0:
             continue
         out += block[sep + 1:]
