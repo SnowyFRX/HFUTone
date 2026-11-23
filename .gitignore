@@ -1,0 +1,19 @@
+# 构建产物
+dist/
+build/
+*.spec.bak
+
+# Python
+__pycache__/
+*.pyc
+
+# 运行期配置与凭据：含 cookie、登录态、日志，绝不入库
+.config/
+.tmp-dist-config/
+*.log
+
+# 外部二进制：84MB，不入库（放到 vendor/ffmpeg/ffmpeg.exe 即可）
+vendor/ffmpeg/
+
+# 临时目录
+tmp*/

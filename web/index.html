@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="zh-CN" data-type="software">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>HFUTone · 工大直播课堂与雨课堂</title>
+<meta name="description" content="合肥工业大学直播课堂 + 长江雨课堂的桌面控制台：拉课表、开直播、一键签到、看课件。">
+<meta name="theme-color" content="#f7f4ed">
+<meta name="hfutlive-ui" content="2026.11.16.7">
+<script>
+/* 在业务脚本之前捕获异常；即使 app.js 加载失败，也能留下诊断信息。 */
+(function () {
+  var boot = window.HFUTLiveBoot = { version: '2026.11.16.7', errors: [], onError: null };
+  function report(kind, detail) {
+    var error = detail.error || detail.reason || null;
+    var resource = detail.target && (detail.target.src || detail.target.href);
+    var item = {
+      kind: kind,
+      message: String(detail.message || (error && error.message) || (resource ? '资源加载失败：' + resource : '未知错误')).slice(0, 1000),
+      stack: String((error && error.stack) || '').slice(0, 4000),
+      source: String(detail.filename || resource || '').slice(0, 500),
+      line: detail.lineno || 0,
+      version: boot.version,
+      href: location.href,
+      at: new Date().toISOString()
+    };
+    boot.errors.push(item);
+    if (boot.errors.length > 10) boot.errors.shift();
+    try {
+      var payload = new Blob([JSON.stringify(item)], { type: 'application/json' });
+      if (!navigator.sendBeacon || !navigator.sendBeacon('/api/client_log', payload)) {
+        fetch('/api/client_log', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(item), keepalive: true
+        }).catch(function () {});
+      }
+    } catch (_) {}
+    if (boot.onError) boot.onError(item);
+  }
+  boot.report = report;
+  window.addEventListener('error', function (e) { report('error', e); }, true);
+  window.addEventListener('unhandledrejection', function (e) { report('promise', e); });
+})();
+</script>
+<link rel="stylesheet" href="app.css?v=2026.11.22.3">
+<link rel="stylesheet" href="ykt.css?v=2026.11.23.1">
+</head>
+<body>
+
+<canvas id="ocean" aria-hidden="true"></canvas>
+
+<div class="app">
+
+  <header class="head" data-enter style="--d:0">
+    <div class="brand">
+      <h1>HFUTone</h1>
+      <p class="sub">工大 · 直播课堂与雨课堂</p>
+    </div>
+    <div class="head-actions">
+      <button id="btnYkt" type="button" aria-expanded="false" aria-controls="viewYkt">
+        <span aria-hidden="true">◫</span> 在线课堂<span class="badge" id="yktBadge" hidden></span>
+      </button>
+      <button id="btnSettings" type="button" aria-haspopup="dialog" aria-controls="settingsBackdrop">
+        <span aria-hidden="true">☰</span> 设置
+      </button>
+      <button id="btnAccount" type="button" onclick="(window.HFUTLive&&window.HFUTLive.openLogin||function(){document.getElementById('loginBackdrop').classList.add('open')})()">
+        <span aria-hidden="true">◉</span> 账号
+      </button>
+      <button id="btnRefresh" type="button">
+        <span aria-hidden="true">↻</span> 刷新
+      </button>
+    </div>
+  </header>
+
+  <div class="bar" data-enter style="--d:1">
+    <span class="dot" id="dot" aria-hidden="true"></span>
+    <span class="status" id="statusText" role="status" aria-live="polite">正在连接…</span>
+    <span class="count" id="countText"></span>
+  </div>
+
+  <div class="notice" id="notice" hidden role="alert">
+    <span class="notice-ic" aria-hidden="true">!</span>
+    <p id="noticeText"></p>
+    <button type="button" id="btnDiagnose">重新检测</button>
+  </div>
+
+  <div class="split" data-enter style="--d:2">
+  <main class="workspace" id="viewLive">
+    <section class="deck-panel" aria-labelledby="upcomingTitle">
+      <div class="deck-head">
+        <div class="deck-heading">
+          <p class="eyebrow" id="deckEyebrow">UP NEXT</p>
+          <h2 id="upcomingTitle">接下来</h2>
+        </div>
+        <div class="deck-nav" aria-label="切换待开始课程">
+          <span class="deck-counter" id="deckCounter" aria-live="polite">—</span>
+          <button class="deck-arrow" id="btnPrev" type="button" aria-label="上一场课程" disabled>←</button>
+          <button class="deck-arrow" id="btnNext" type="button" aria-label="下一场课程" disabled>→</button>
+        </div>
+      </div>
+
+      <div class="deck-stage" id="deckStage" aria-label="未开始课程卡片">
+        <!-- 堆叠卡片由 app.js 注入 -->
+      </div>
+
+      <div class="deck-foot">
+        <div class="deck-pager" id="deckPager" aria-label="课程位置"></div>
+      </div>
+    </section>
+
+    <details class="all-courses" id="allCourses">
+      <summary>
+        <span class="all-label">全部课程</span>
+        <span class="all-count" id="allCount"></span>
+        <span class="all-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="all-tools" id="hiddenNote" hidden>
+        <span id="hiddenText"></span>
+        <button id="btnUnhide" type="button">全部恢复</button>
+      </div>
+      <section class="panel" aria-label="完整课程列表">
+        <div class="thead" aria-hidden="true">
+          <span>课程</span>
+          <span>状态</span>
+          <span>时间</span>
+          <span>教室</span>
+        </div>
+        <div class="rows" id="rows" role="listbox" aria-label="全部直播课程">
+          <!-- 行由 app.js 注入 -->
+        </div>
+      </section>
+    </details>
+  </main>
+
+  <aside class="side" id="viewYkt" aria-hidden="true" aria-label="在线课堂">
+    <div class="side-grip" id="sideGrip" role="separator" aria-orientation="vertical"
+         aria-label="拖动调整侧栏宽度，双击复位"></div>
+
+    <!-- 雨课堂 / 学习通 合成一张卡片：切换条在卡片内部顶部，
+         整张卡高度固定（--side-panel-h），所以切换时下面的直播画面纹丝不动 -->
+    <div class="side-shell">
+      <div class="side-tabs" role="tablist" aria-label="在线课堂">
+        <button type="button" role="tab" id="tabYkt" aria-selected="true"
+                aria-controls="panelYkt" class="is-on">雨课堂</button>
+        <button type="button" role="tab" id="tabCx" aria-selected="false"
+                aria-controls="panelCx">学习通</button>
+      </div>
+
+      <div class="side-panels" id="sidePanels">
+        <section class="ykt-panel" id="panelYkt" role="tabpanel" aria-labelledby="tabYkt">
+          <div class="ykt-head">
+            <div class="ykt-titlerow">
+              <div class="ykt-title">
+                <p class="eyebrow">YUKETANG</p>
+                <h2>长江雨课堂</h2>
+              </div>
+              <div class="bar">
+                <span class="dot" id="yktDot" aria-hidden="true"></span>
+                <span class="status" id="yktStatus" role="status" aria-live="polite">未登录</span>
+                <span class="count" id="yktCount"></span>
+                <span class="identity" id="yktIdentity" hidden></span>
+              </div>
+            </div>
+            <div class="ykt-actions">
+              <button id="yktAppBtn" type="button" class="primary">App 登录</button>
+              <button id="yktRefreshBtn" type="button">↻ 刷新课程</button>
+            </div>
+          </div>
+
+          <div class="ykt-list" id="yktLessons" aria-label="进行中的课堂">
+            <!-- 行由 ykt.js 注入 -->
+          </div>
+
+          <div class="ykt-foot">
+            <button class="primary" id="yktCheckAll" type="button" disabled>一键签到</button>
+            <button id="yktLogout" type="button" hidden>退出登录</button>
+          </div>
+        </section>
+
+        <section class="ykt-panel" id="panelCx" role="tabpanel" aria-labelledby="tabCx" hidden>
+          <div class="ykt-head">
+            <div class="ykt-titlerow">
+              <div class="ykt-title">
+                <p class="eyebrow">CHAOXING</p>
+                <h2>学习通签到</h2>
+              </div>
+              <div class="bar">
+                <span class="dot" id="cxDot" aria-hidden="true"></span>
+                <span class="status" id="cxStatus" role="status" aria-live="polite">未登录</span>
+                <span class="count" id="cxCount"></span>
+              </div>
+            </div>
+            <div class="ykt-actions">
+              <button id="cxLoginBtn" type="button">登录</button>
+              <button id="cxScanBtn" type="button">↻ 刷新签到</button>
+            </div>
+          </div>
+
+          <div class="ykt-list" id="cxSigns" aria-label="进行中的签到">
+            <!-- 行由 cx.js 注入 -->
+          </div>
+
+          <div class="ykt-foot">
+            <button class="primary" id="cxSignAll" type="button" disabled>一键签到</button>
+            <button id="cxLogout" type="button" hidden>退出登录</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <section class="live-card" id="liveCard" aria-label="直播画面">
+      <div class="live-head">
+        <div class="live-titles">
+          <p class="eyebrow">LIVE BOARD</p>
+          <h2 id="liveTitle">直播画面 · PPT</h2>
+        </div>
+        <span class="live-meta" id="liveMeta">未开始</span>
+      </div>
+      <div class="live-stage" id="liveStage">
+        <canvas id="liveCanvas" width="1280" height="720"></canvas>
+        <div class="live-empty" id="liveEmpty">
+          <p id="liveEmptyText">课程开始后画面会自动接上来。</p>
+          <button type="button" id="liveStart">手动拉取</button>
+        </div>
+      </div>
+      <div class="live-foot">
+        <span class="live-stat" id="liveStat">—</span>
+        <span class="live-lag" id="liveLag" hidden>—</span>
+        <button type="button" id="liveStop" hidden>停止画面</button>
+      </div>
+    </section>
+  </aside>
+  </div>
+
+  <div class="foot" data-enter style="--d:3">
+    <p class="hint" id="playHint">Enter 开启直播 · Ctrl+C 复制 HLS 地址</p>
+    <button class="hide-course" id="btnHide" type="button" disabled>隐藏此课</button>
+    <button id="btnClose" type="button">× 关闭播放器</button>
+    <button class="primary play" id="btnPlay" type="button" disabled>
+      ▶ 开启直播
+    </button>
+  </div>
+
+</div>
+
+<!-- 雨课堂 · App 登录（方案 A：拿 App 体系的凭据，动态码签到就不用扫码） -->
+<div class="backdrop" id="yktAppBackdrop" role="dialog" aria-modal="true" aria-labelledby="yktAppTitle">
+  <div class="sheet sheet-app-login">
+    <h2 id="yktAppTitle">雨课堂 App 登录</h2>
+    <p class="lead">用 App 身份登录一次即可：同一套凭据既走 App 接口（动态码考勤免扫），也走网页接口，14 天内不用重登。需要过一次官方人机验证。</p>
+
+    <div id="yktAppForm">
+      <div class="seg" id="yktAppMode" role="tablist" aria-label="登录方式">
+        <button type="button" data-kind="1" class="on" role="tab" aria-selected="true">密码登录</button>
+        <button type="button" data-kind="3" role="tab" aria-selected="false">验证码登录</button>
+      </div>
+      <div class="cx-form">
+        <label class="cx-field">
+          <span id="yktAppAccountLabel">手机号 / 邮箱</span>
+          <input type="text" id="yktAppAccount" autocomplete="username" spellcheck="false" placeholder="13800138000">
+        </label>
+        <label class="cx-field" id="yktAppPwdField">
+          <span>密码</span>
+          <input type="password" id="yktAppPassword" autocomplete="current-password" placeholder="雨课堂密码">
+        </label>
+        <label class="cx-field" id="yktAppCodeField" hidden>
+          <span>短信验证码</span>
+          <div class="code-row">
+            <input type="text" id="yktAppCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字">
+            <button type="button" id="yktAppSendCode">发送验证码</button>
+          </div>
+        </label>
+      </div>
+      <p class="err-line" id="yktAppMsg" role="status"></p>
+      <div class="sheet-actions">
+        <button type="button" id="yktAppCancel">取消</button>
+        <button type="button" class="primary" id="yktAppGo">去验证并登录</button>
+      </div>
+    </div>
+
+    <div id="yktAppStage" hidden>
+      <iframe id="yktAppFrame" title="人机验证" src="about:blank"></iframe>
+      <p class="err-line" id="yktAppStageMsg" role="status">正在打开人机验证…</p>
+      <div class="sheet-actions">
+        <button type="button" id="yktAppBack">返回重填</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 雨课堂 · 课件查看器 -->
+<div class="backdrop ykt-pres" id="yktPresBackdrop" role="dialog" aria-modal="true" aria-labelledby="yktPresTitle">
+  <div class="pres-sheet">
+    <header class="pres-head">
+      <h2 id="yktPresTitle">课堂课件</h2>
+      <span class="pres-count" id="yktPresCount"></span>
+      <button type="button" id="yktPresClose" aria-label="关闭">×</button>
+    </header>
+    <div class="pres-stage" id="yktPresStage"></div>
+  </div>
+</div>
+
+<!-- 雨课堂 · 随堂题 -->
+<div class="backdrop ykt-pres" id="yktQBackdrop" role="dialog" aria-modal="true" aria-labelledby="yktQTitle">
+  <div class="pres-sheet">
+    <header class="pres-head">
+      <h2 id="yktQTitle">随堂题</h2>
+      <span class="pres-count" id="yktQCount"></span>
+      <button type="button" id="yktQReload" aria-label="重新拉取">↻</button>
+      <button type="button" id="yktQClose" aria-label="关闭">×</button>
+    </header>
+    <div class="pres-stage q-list" id="yktQStage"></div>
+  </div>
+</div>
+
+<!-- 学习通 · 登录弹层 -->
+<div class="backdrop" id="cxLoginBackdrop" role="dialog" aria-modal="true" aria-labelledby="cxLoginTitle">
+  <div class="sheet">
+    <h2 id="cxLoginTitle">登录学习通</h2>
+    <p class="lead">账号密码走的是学习通网页登录口，和你在浏览器里登录是同一套流程。</p>
+    <div class="cx-form">
+      <label class="cx-field">
+        <span>手机号 / 账号</span>
+        <input type="text" id="cxPhone" autocomplete="username" spellcheck="false" placeholder="13800138000">
+      </label>
+      <label class="cx-field">
+        <span>密码</span>
+        <input type="password" id="cxPassword" autocomplete="current-password" placeholder="学习通密码">
+      </label>
+    </div>
+    <p class="err-line" id="cxLoginMsg" role="alert"></p>
+    <div class="sheet-actions">
+      <button type="button" id="cxLoginCancel">取消</button>
+      <button type="button" class="primary" id="cxLoginSubmit">登录</button>
+    </div>
+  </div>
+</div>
+
+<!-- 学习通 · 输入弹层（手势 / 签到码 / 二维码 / 验证码共用） -->
+<div class="backdrop" id="cxInputBackdrop" role="dialog" aria-modal="true" aria-labelledby="cxInputTitle">
+  <div class="sheet">
+    <h2 id="cxInputTitle">补充签到信息</h2>
+    <p class="lead" id="cxInputLead"></p>
+    <input type="text" id="cxInputValue" spellcheck="false" autocomplete="off" placeholder="">
+    <p class="err-line" id="cxInputMsg" role="status"></p>
+    <div class="sheet-actions">
+      <button type="button" id="cxInputCancel">取消</button>
+      <button type="button" class="primary" id="cxInputSubmit">提交</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置弹层 -->
+<div class="backdrop" id="settingsBackdrop" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="sheet sheet-wide">
+    <h2 id="settingsTitle">设置</h2>
+    <p class="lead">改完即时生效，配置存在本机 .config/settings.json。</p>
+
+    <div class="set-grid">
+      <div class="set-group">
+        <p class="set-title">自动推流</p>
+        <label class="set-row">
+          <input type="checkbox" id="setAutoPlay" checked>
+          <span><b>课程开播时自动接画面</b><em>每 12 秒看一次有没有课开播</em></span>
+        </label>
+      </div>
+
+      <div class="set-group">
+        <p class="set-title">拉取的流</p>
+        <label class="set-row">
+          <input type="checkbox" id="setPpt">
+          <span><b>PPT 独立窗口</b><em>侧栏嵌入照旧，另开一个窗口</em></span>
+        </label>
+        <label class="set-row">
+          <input type="checkbox" id="setTeacher" checked>
+          <span><b>老师流</b><em>单独开窗口，带声音</em></span>
+        </label>
+        <label class="set-row">
+          <input type="checkbox" id="setStudent">
+          <span><b>学生流</b><em>教室全景，无音频</em></span>
+        </label>
+      </div>
+
+      <div class="set-group">
+        <p class="set-title">雨课堂签到通道</p>
+        <p class="set-hint">固定走 App 身份（App 登录拿的凭据 + App 头）。动态码考勤按这条路不需要再扫码。</p>
+      </div>
+
+      <div class="set-group">
+        <p class="set-title">学习通位置签到坐标</p>
+        <p class="set-hint">签到只有 5 秒窗口，坐标得提前配好。</p>
+        <label class="cx-field">
+          <span>地点描述</span>
+          <input type="text" id="setCxAddress" spellcheck="false" placeholder="翡翠湖校区 · 西二302">
+        </label>
+        <div class="cx-row2">
+          <label class="cx-field">
+            <span>纬度</span>
+            <input type="number" id="setCxLat" step="0.000001" min="-90" max="90" placeholder="31.86">
+          </label>
+          <label class="cx-field">
+            <span>经度</span>
+            <input type="number" id="setCxLng" step="0.000001" min="-180" max="180" placeholder="117.28">
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <p class="err-line" id="settingsMsg" role="status"></p>
+    <div class="sheet-actions">
+      <button type="button" class="primary" id="settingsDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 账号弹层 -->
+<div class="backdrop" id="loginBackdrop" role="dialog" aria-modal="true" aria-labelledby="loginTitle">
+  <div class="sheet">
+    <h2 id="loginTitle">工大统一身份认证</h2>
+    <p class="lead">凭据只保存在本机注册表，用于 CAS 登录换取直播会话。</p>
+    <form id="loginForm" novalidate>
+      <div class="field">
+        <label for="u">学号</label>
+        <input id="u" name="username" autocomplete="username" placeholder="例如 2025xxxxxx" spellcheck="false">
+      </div>
+      <div class="field">
+        <label for="p">信息门户密码</label>
+        <input id="p" name="password" type="password" autocomplete="current-password" placeholder="CAS 登录密码">
+      </div>
+      <p class="err-line" id="loginErr" role="alert"></p>
+      <div class="sheet-actions">
+        <button type="button" id="btnCancel">取消</button>
+        <button type="submit" class="primary" id="btnSave">保存并登录</button>
+      </div>
+      <p class="build-info" id="uiVersion">HFUTone UI</p>
+    </form>
+  </div>
+</div>
+
+<!-- 画面放大层：挂在 body 下，fixed 才真正相对视口（侧栏里的 .side 有 overflow/transform） -->
+<div class="live-zoom" id="liveZoom" hidden>
+  <canvas id="liveZoomCanvas" aria-label="直播画面（放大）"></canvas>
+</div>
+
+<div class="toast-wrap" id="toasts" aria-live="polite"></div>
+
+<script src="ascii-sharks.bundle.js?v=2026.11.16.7"></script>
+<script src="app.js?v=2026.11.16.7"></script>
+<script src="ykt.js?v=2026.11.23.1"></script>
+<script src="cx.js?v=2026.11.22.5"></script>
+<script src="ppt.js?v=2026.11.22.7"></script>
+<script>
+/* HTML 与业务脚本版本不一致时只重载一次；NoCache + no-store 保证拿到新资源。 */
+(function () {
+  var expected = window.HFUTLiveBoot.version;
+  if (window.HFUTLive && window.HFUTLive.version === expected) {
+    sessionStorage.removeItem('hfutlive.ui-reload');
+    return;
+  }
+  if (!sessionStorage.getItem('hfutlive.ui-reload')) {
+    sessionStorage.setItem('hfutlive.ui-reload', '1');
+    location.reload();
+  } else {
+    document.getElementById('statusText').textContent = '界面资源版本不一致，请关闭窗口后重新打开';
+  }
+})();
+</script>
+</body>
+</html>

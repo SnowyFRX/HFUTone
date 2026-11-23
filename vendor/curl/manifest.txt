@@ -1,0 +1,3 @@
+curl.exe=3959912
+libcurl-x64.dll=3724904
+cacert.pem=200116

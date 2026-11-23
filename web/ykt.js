@@ -1,0 +1,806 @@
+/* ============================================================================
+   HFUTone · 雨课堂一栏
+   只做界面与调用：所有协议都在 web/server.py 的 /api/ykt/* 后面。
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var state = { loggedIn: false, lessons: [], loaded: false, busy: false, error: '', user: {} };
+
+  /* ------------------------------------------------------------------ 工具 */
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function api(path, body) {
+    var opt = body === undefined ? {} : {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    };
+    return fetch(path, opt).then(function (r) {
+      return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; });
+    }, function (e) {
+      return { ok: false, error: String(e && e.message || e) };
+    });
+  }
+
+  function toast(msg, kind) {
+    var wrap = $('toasts');
+    if (!wrap) { console.log('[ykt]', msg); return; }
+    var el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = msg;
+    wrap.appendChild(el);
+    setTimeout(function () {
+      el.classList.add('out');
+      setTimeout(function () { el.remove(); }, 400);
+    }, 2600);
+  }
+
+  /* -------------------------------------------------------- 侧栏开合
+     直播是底座，雨课堂是附加层：默认收起，需要时展开成右侧一栏。 */
+  var sideOpen = false;
+  var lastPending = 0;
+
+  function setSide(open) {
+    sideOpen = !!open;
+    // 不再用 hidden 硬切：display:none 会把过渡一起掐掉。
+    // 收起/展开交给 .is-open，CSS 那边做宽度/位移/透明度过渡。
+    var el = $('viewYkt');
+    el.classList.toggle('is-open', sideOpen);
+    el.setAttribute('aria-hidden', sideOpen ? 'false' : 'true');
+    $('btnYkt').setAttribute('aria-expanded', sideOpen ? 'true' : 'false');
+    $('btnYkt').classList.toggle('is-on', sideOpen);
+    if (sideOpen) {
+      // 侧栏比窗口高的时候（雨课堂面板 + PPT 卡片）浏览器可能停在底部，
+      // 顶上的「YUKETANG」被裁掉半行。打开时归零，等渲染完再确认一次。
+      el.scrollTop = 0;
+      refresh(false);
+      requestAnimationFrame(function () { el.scrollTop = 0; });
+    }
+  }
+
+  function toggleSide() {
+    setSide(!sideOpen);
+  }
+
+  /* --------------------------------------------------------- 面板切换
+     雨课堂 / 学习通 两个面板共用一块固定高度的区域，切的是 display 和
+     选中态。高度写死在 CSS 里（--side-panel-h），所以下面的直播画面
+     不会因为面板内容多少而改变大小。 */
+  var PANELS = {
+    ykt: { tab: 'tabYkt', panel: 'panelYkt' },
+    cx: { tab: 'tabCx', panel: 'panelCx' }
+  };
+
+  function showPanel(which) {
+    var want = PANELS[which] ? which : 'ykt';
+    Object.keys(PANELS).forEach(function (k) {
+      var on = k === want;
+      var tab = $(PANELS[k].tab);
+      var panel = $(PANELS[k].panel);
+      if (tab) {
+        tab.classList.toggle('is-on', on);
+        tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        tab.setAttribute('tabindex', on ? '0' : '-1');
+      }
+      if (panel) { panel.hidden = !on; }
+    });
+    // 切过去的那块先滚到顶，别让人接着上一块的滚动位置
+    var box = $('sidePanels');
+    if (box) { box.scrollTop = 0; }
+    // 学习通面板第一次露出来时让它自己刷一下状态
+    if (want === 'cx' && window.HFUTCx && window.HFUTCx.refresh) {
+      window.HFUTCx.refresh();
+    }
+  }
+
+  function wireTabs() {
+    Object.keys(PANELS).forEach(function (k) {
+      var tab = $(PANELS[k].tab);
+      if (!tab) { return; }
+      tab.addEventListener('click', function () { showPanel(k); });
+      // 左右方向键在两个 tab 之间走，键盘用户不用 Tab 乱跳
+      tab.addEventListener('keydown', function (e) {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') { return; }
+        e.preventDefault();
+        var next = k === 'ykt' ? 'cx' : 'ykt';
+        showPanel(next);
+        var el = $(PANELS[next].tab);
+        if (el) { el.focus(); }
+      });
+    });
+  }
+
+  /* ------------------------------------------------------------ 侧栏宽度
+     PPT 卡片的画面宽度 = 侧栏宽度 - 内边距，所以给一条能拖的分隔条：
+     画面想多大就把侧栏拉多宽，双击回到默认。 */
+  var SIDE_DEFAULT = 640, SIDE_MIN = 340;
+
+  function sideWidth() {
+    var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--side-w'));
+    return v > 0 ? v : SIDE_DEFAULT;
+  }
+
+  function applySideWidth(px) {
+    document.documentElement.style.setProperty('--side-w', Math.round(px) + 'px');
+  }
+
+  function wireSideGrip() {
+    var grip = $('sideGrip');
+    if (!grip) { return; }
+    var drag = null;
+
+    grip.addEventListener('pointerdown', function (e) {
+      drag = { x: e.clientX, w: sideWidth() };
+      document.body.classList.add('is-side-drag');
+      try { grip.setPointerCapture(e.pointerId); } catch (err) { /* 拿不到就退化成普通拖动 */ }
+      e.preventDefault();
+    });
+
+    grip.addEventListener('pointermove', function (e) {
+      if (!drag) { return; }
+      var max = Math.min(900, window.innerWidth * 0.62);   // 再宽直播区就没地方了
+      var want = drag.w - (e.clientX - drag.x);
+      applySideWidth(Math.max(SIDE_MIN, Math.min(max, want)));
+    });
+
+    function stop() {
+      if (!drag) { return; }
+      drag = null;
+      document.body.classList.remove('is-side-drag');
+      try {
+        localStorage.setItem('hfutone.side-w', String(Math.round(sideWidth())));
+      } catch (err) { /* 无痕模式存不了，不算错 */ }
+    }
+    grip.addEventListener('pointerup', stop);
+    grip.addEventListener('pointercancel', stop);
+
+    grip.addEventListener('dblclick', function () {
+      applySideWidth(SIDE_DEFAULT);
+      try { localStorage.removeItem('hfutone.side-w'); } catch (err) { /* 忽略 */ }
+    });
+
+    var saved = 0;
+    try { saved = parseFloat(localStorage.getItem('hfutone.side-w') || '0'); } catch (err) { saved = 0; }
+    if (saved >= SIDE_MIN) { applySideWidth(saved); }
+  }
+
+  /* ---------------------------------------------------------------- 渲染 */
+  function statusOf(row) {
+    if (row.checkedAt) {
+      // '服务器' 是 on-lesson 的 signinStatus 来的，比本地标记更权威
+      var when = row.checkedAt === '服务器' ? '· 服务器记录' : row.checkedAt;
+      return { text: '已签到 ' + when, cls: 'is-on' };
+    }
+    if (row._state) return row._state;
+    return { text: '未签到', cls: 'is-off' };
+  }
+
+  function render() {
+    var box = $('yktLessons');
+    var user = state.user || {};
+    var who = (user.name || '').trim();
+    var status, count;
+    if (!state.loggedIn) {
+      status = state.error || '未登录';
+      count = '';
+    } else if (state.error) {
+      status = '加载失败：' + state.error;
+      count = who;
+    } else if (!state.loaded) {
+      status = who ? who + ' · 正在加载…' : '正在加载…';
+      count = user.school || '';
+    } else {
+      status = (who || '已登录') + ' · ' + (state.lessons.length ? state.lessons.length + ' 节在播' : '暂无在播');
+      count = user.school || '';
+    }
+    $('yktStatus').textContent = status;
+    $('yktDot').className = 'dot' + (state.loggedIn && !state.error ? ' ok' : (state.error ? ' err' : ''));
+    $('yktCount').textContent = count;
+    $('yktLogout').hidden = !state.loggedIn;
+
+    // 身份标识：让「App 登录成功了」和「App 身份真的生效了」在界面上能分开看。
+    // 之前两者混在一起，用户点了登录、看到绿色成功、退出弹层却什么也没变。
+    var idEl = $('yktIdentity');
+    if (idEl) {
+      var isApp = (state.identity || 'web') === 'app';
+      idEl.hidden = !state.loggedIn;
+      idEl.textContent = isApp ? 'App 身份' : '浏览器身份';
+      idEl.className = 'identity' + (isApp ? ' is-app' : '');
+      idEl.title = isApp
+        ? '当前用 App 体系凭据发请求，动态码考勤可免扫'
+        : '当前用浏览器凭据发请求；动态码考勤需要 App 身份';
+    }
+
+    // 未签到红点：不打扰看直播，只在顶栏那个开关上点一下
+    var pending = state.loggedIn
+      ? state.lessons.filter(function (r) { return !r.checkedAt; }).length : 0;
+    $('yktBadge').hidden = !pending;
+    if (pending && !lastPending) {
+      toast('雨课堂：' + pending + ' 节课还没签到', 'warn');
+    }
+    lastPending = pending;
+    $('yktCheckAll').disabled = !state.loggedIn || !state.lessons.length || state.busy;
+
+    if (!state.loggedIn) {
+      box.innerHTML = '<p class="ykt-empty">'
+        + (state.error ? esc(state.error) + '，点【App 登录】重新登一下。'
+                       : '还没登录。点【App 登录】用手机号/验证码登一次即可（手机号+密码也行）。')
+        + '</p>';
+      return;
+    }
+    if (!state.lessons.length) {
+      box.innerHTML = '<p class="ykt-empty">当前没有进行中的课堂。上课后再点【刷新课程】。</p>';
+      return;
+    }
+    box.innerHTML = state.lessons.map(function (row) {
+      var st = statusOf(row);
+      return '<div class="ykt-row" data-id="' + esc(row.lessonId) + '">'
+        + '<div class="ykt-row-main">'
+        + '<div class="ykt-row-name">' + esc(row.name || row.courseName || row.lessonId) + '</div>'
+        + '<div class="ykt-row-meta">' + esc(row.lessonId)
+        + (row.classroomName ? ' · ' + esc(row.classroomName) : '')
+        + (row.teacher ? ' · ' + esc(row.teacher) : '') + '</div>'
+        + '</div>'
+        + '<span class="ykt-row-state ' + st.cls + '">' + esc(st.text) + '</span>'
+        + '<div class="ykt-row-btns">'
+        + '<button data-act="check" type="button"' + (row.checkedAt ? ' disabled' : '') + '>签到</button>'
+        + '<button data-act="pres" type="button">看课件</button>'
+        + '<button data-act="q" type="button">题目</button>'
+        + (row.checkedAt === '服务器'
+            ? '<button data-act="mark" type="button" disabled title="服务器已记录签到，取消本地标记也不会改服务器">服务器已签</button>'
+            : '<button data-act="mark" type="button">' + (row.checkedAt ? '取消标记' : '标记已签') + '</button>')
+        + '</div></div>';
+    }).join('');
+  }
+
+  function rowById(id) {
+    for (var i = 0; i < state.lessons.length; i++) {
+      if (state.lessons[i].lessonId === id) return state.lessons[i];
+    }
+    return null;
+  }
+
+  /* -------------------------------------------------------------- 状态同步 */
+  function pull() {
+    return api('/api/ykt/state').then(function (d) {
+      if (d && typeof d.loggedIn === 'boolean') {
+        state.loggedIn = d.loggedIn;
+        state.lessons = d.lessons || [];
+        state.loaded = d.loaded;
+        state.busy = d.busy;
+        state.error = d.error || '';
+        state.user = d.user || {};
+        state.identity = d.identity || 'web';
+        render();
+        if (state.loggedIn && !(state.user.name || '').trim()) {
+          // 登录态在、但还不知道是谁（例如上次没拉到）——补拉一次
+          api('/api/ykt/profile').then(function (u) {
+            if (u && u.user && u.user.name) { state.user = u.user; render(); }
+          });
+        }
+      }
+      return d;
+    });
+  }
+
+  function refresh(force) {
+    if (!state.loggedIn) { return pull(); }
+    $('yktStatus').textContent = '正在拉取课程…';
+    return api(force ? '/api/ykt/refresh' : '/api/ykt/lessons', {}).then(function (d) {
+      if (d && d.error) { state.error = d.error; }
+      return pull();
+    });
+  }
+
+  /* --------------------------------------------------------------- 弹层 */
+  function openBackdrop(id) { $(id).classList.add('open'); }
+  function closeBackdrop(id) { $(id).classList.remove('open'); }
+
+  /* --------------------------------------------------------------- 随堂题 */
+  var qTimer = null, qLesson = '';
+
+  function leftText(q) {
+    if (q.unlimited || !q.limitSec || !q.dt) return '不限时';
+    var left = q.dt + q.limitSec + (q.extendSec || 0) - Math.floor(Date.now() / 1000);
+    if (left <= 0) return '已超时';
+    var m = Math.floor(left / 60), s = left % 60;
+    return '剩 ' + (m ? m + ' 分 ' : '') + s + ' 秒';
+  }
+
+  function renderQuestions() {
+    var row = rowById(qLesson);
+    var items = (row && row._questions) || [];
+    $('yktQCount').textContent = items.length ? items.length + ' 道' : '';
+    if (!items.length) {
+      $('yktQStage').innerHTML = '<p class="pres-empty">这节课还没有题目。老师发了题再点 ↻ 拉一次。</p>';
+      return;
+    }
+    $('yktQStage').innerHTML = items.map(function (q, i) {
+      var badge = q.closed ? '<span class="q-badge is-closed">已收题</span>'
+        : (q.answered ? '<span class="q-badge is-done">已作答</span>'
+          : '<span class="q-badge">待作答</span>');
+      var ph = q.problemType === 2 ? '多选：A,B,C'
+        : q.problemType === 3 ? '填空：多个空用逗号分隔'
+          : q.problemType === 5 ? '主观题文字答案'
+            : '单选/判断：A / B / C / D';
+      return '<div class="q-card" data-pid="' + esc(q.problemId) + '">'
+        + '<div class="q-head">'
+        + '<span class="q-badge">' + esc(q.typeName) + '</span>'
+        + badge
+        + '<span>' + esc(q.problemId) + '</span>'
+        + '<span class="q-left" data-left="' + i + '">' + esc(leftText(q)) + '</span>'
+        + '</div>'
+        + '<div class="q-body">'
+        + '<input type="text" data-in="' + esc(q.problemId) + '" placeholder="' + esc(ph) + '">'
+        + '<button type="button" data-act="send" data-pid="' + esc(q.problemId) + '"'
+        + ' data-type="' + q.problemType + '" data-dt="' + q.dt + '">提交</button>'
+        + '</div>'
+        + '<p class="q-note" data-note="' + esc(q.problemId) + '"></p>'
+        + '</div>';
+    }).join('');
+    tickQuestions();
+  }
+
+  function tickQuestions() {
+    var row = rowById(qLesson);
+    var items = (row && row._questions) || [];
+    items.forEach(function (q, i) {
+      var el = document.querySelector('[data-left="' + i + '"]');
+      if (!el) return;
+      var t = leftText(q);
+      el.textContent = t;
+      el.classList.toggle('is-urgent', t.indexOf('剩') === 0 && parseInt(t.replace(/\D/g, ''), 10) <= 60);
+    });
+  }
+
+  function loadQuestions(lessonId) {
+    qLesson = lessonId;
+    var row = rowById(lessonId);
+    $('yktQStage').innerHTML = '<p class="pres-empty">正在连网关拉题目（最多十几秒）…</p>';
+    $('yktQCount').textContent = '';
+    api('/api/ykt/questions?lesson=' + encodeURIComponent(lessonId)).then(function (d) {
+      if (row) row._questions = (d && d.items) || [];
+      if (!d || !d.ok) {
+        $('yktQStage').innerHTML = '<p class="pres-empty">' + esc((d && d.error) || '拉取失败') + '</p>';
+        return;
+      }
+      renderQuestions();
+    });
+  }
+
+  function openQuestions(row) {
+    openBackdrop('yktQBackdrop');
+    $('yktQTitle').textContent = (row.name || '课堂') + ' · 随堂题';
+    if (qTimer) { clearInterval(qTimer); qTimer = null; }
+    qTimer = setInterval(function () {
+      if (!$('yktQBackdrop').classList.contains('open')) return;
+      tickQuestions();
+    }, 1000);
+    if (row._questions && row._questions.length) {
+      qLesson = row.lessonId;
+      renderQuestions();
+    } else {
+      loadQuestions(row.lessonId);
+    }
+  }
+
+  /* --------------------------------------------------------------- 课件 */
+  function openPres(row) {
+    openBackdrop('yktPresBackdrop');
+    $('yktPresTitle').textContent = row.name || '课堂课件';
+    $('yktPresCount').textContent = '正在拉取…';
+    $('yktPresStage').innerHTML = '<p class="pres-empty">正在拉取课件…</p>';
+    api('/api/ykt/pres?lesson=' + encodeURIComponent(row.lessonId)).then(function (d) {
+      if (!d || !d.ok) {
+        $('yktPresStage').innerHTML = '<p class="pres-empty">' + esc((d && d.error) || '拉取失败') + '</p>';
+        $('yktPresCount').textContent = '';
+        return;
+      }
+      $('yktPresTitle').textContent = d.title || row.name || '课堂课件';
+      var slides = d.slides || [];
+      $('yktPresCount').textContent = slides.length + ' 页';
+      if (!slides.length) {
+        $('yktPresStage').innerHTML = '<p class="pres-empty">这份课件没有可显示的页</p>';
+        return;
+      }
+      $('yktPresStage').innerHTML = slides.map(function (s, i) {
+        var src = s.url ? '/api/ykt/img?u=' + encodeURIComponent(s.url) : '';
+        return src
+          ? '<img loading="lazy" alt="第 ' + (i + 1) + ' 页" src="' + src + '">'
+          : '<p class="pres-empty">第 ' + (i + 1) + ' 页没有图片</p>';
+      }).join('');
+    });
+  }
+
+  /* --------------------------------------------------------------- 事件 */
+  function bind() {
+    // 鼠标点完按钮就主动失焦：Chromium 会给聚焦元素画一圈系统强调色焦点环，
+    // 这台机器强调色是橙黄，点在哪个按钮上就在哪个按钮外面留一圈框。
+    // 只对指针点击生效（e.detail > 0），键盘 Enter 触发时 detail 是 0，焦点照旧留着。
+    document.addEventListener('click', function (e) {
+      if (!e.detail) return;
+      var btn = e.target.closest ? e.target.closest('button, summary') : null;
+      if (btn && btn.blur) btn.blur();
+    }, true);
+
+    $('btnYkt').addEventListener('click', toggleSide);
+
+
+    $('yktRefreshBtn').addEventListener('click', function () { refresh(true); });
+
+    /* ------------------------------------------------ App 登录（方案 A）
+       用 App 身份登录一次即可：这套凭据既走 App 接口（动态码考勤免扫），
+       也走网页接口（实测 on-lesson 两种头都 200）。
+       两种登录方式，短信那条是两步（发码 / 登录），每步各过一次人机验证：
+         kind=1  手机号/邮箱 + 密码
+         kind=3  手机号 + 短信验证码（POST /api/v3/user/code/send 发码） */
+    var appTimer = null;
+    var appKind = 1;
+
+    function appShowForm() {
+      if ($('yktAppForm')) { $('yktAppForm').hidden = false; }
+      if ($('yktAppStage')) { $('yktAppStage').hidden = true; }
+      if ($('yktAppFrame')) { $('yktAppFrame').src = 'about:blank'; }
+      appSyncMode();
+    }
+
+    function appStopPoll() {
+      if (appTimer) { clearInterval(appTimer); appTimer = null; }
+    }
+
+    /* 切换「密码 / 验证码」时同步字段与分段控件的选中态 */
+    function appSyncMode() {
+      var sms = appKind === 3;
+      if ($('yktAppPwdField')) { $('yktAppPwdField').hidden = sms; }
+      if ($('yktAppCodeField')) { $('yktAppCodeField').hidden = !sms; }
+      if ($('yktAppAccount')) {
+        $('yktAppAccount').placeholder = sms ? '11 位手机号' : '13800138000 / 邮箱';
+      }
+      if ($('yktAppAccountLabel')) {
+        $('yktAppAccountLabel').textContent = sms ? '手机号' : '手机号 / 邮箱';
+      }
+      var seg = $('yktAppMode');
+      if (seg) {
+        for (var i = 0; i < seg.children.length; i++) {
+          var b = seg.children[i];
+          var on = String(b.getAttribute('data-kind')) === String(appKind);
+          if (on) { b.classList.add('on'); } else { b.classList.remove('on'); }
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+        }
+      }
+    }
+
+    function appOpenStage(page) {
+      if ($('yktAppForm')) { $('yktAppForm').hidden = true; }
+      if ($('yktAppStage')) { $('yktAppStage').hidden = false; }
+      if ($('yktAppStageMsg')) {
+        $('yktAppStageMsg').className = 'err-line';
+        $('yktAppStageMsg').textContent = '请在下面完成人机验证';
+      }
+      if ($('yktAppFrame')) { $('yktAppFrame').src = page || '/api/ykt/applogin/page'; }
+      appPoll();
+    }
+
+    function appPoll() {
+      appStopPoll();
+      appTimer = setInterval(function () {
+        api('/api/ykt/applogin/state').then(function (d) {
+          if (!d) { return; }
+          var msg = $('yktAppStageMsg');
+          if (d.state === 'verifying' && msg) { msg.textContent = '正在登录…'; }
+          if (d.state === 'sent') {
+            // 短信第一步完成：人机验证用掉了，回表单填验证码
+            appStopPoll();
+            appShowForm();
+            if ($('yktAppMsg')) { $('yktAppMsg').textContent = '验证码已发送，填进来再点「去验证并登录」'; }
+            if ($('yktAppCode')) { $('yktAppCode').focus(); }
+          } else if (d.state === 'ok') {
+            appStopPoll();
+            var who = (d.user && d.user.name) || '';
+            if (msg) {
+              msg.className = 'app-result is-ok';
+              msg.textContent = '✅ App 身份可用'
+                + (who ? '：' + who : '')
+                + '\n动态二维码考勤不用再扫码了；雨课堂面板右上角会显示「App 身份」。';
+            }
+            toast('雨课堂 App 身份已生效' + (who ? '：' + who : ''), 'ok');
+            setTimeout(function () {
+              closeBackdrop('yktAppBackdrop');
+              appShowForm();
+              pull().then(function () { refresh(true); });
+            }, 2200);
+          } else if (d.state === 'fail') {
+            appStopPoll();
+            var ver = d.verify || {};
+            var name = (d.user && d.user.name) || '';
+            if (msg) {
+              // 登录成功但身份不可用 —— 这是最容易被误读成「什么也没变」的情况，
+              // 必须在这里用大字说清楚，而不是靠一条 2.6 秒的 toast。
+              if (name && ver && ver.note) {
+                msg.className = 'app-result is-warn';
+                msg.textContent = '⚠️ 账号登录成功（' + name + '），但 App 身份不可用\n'
+                  + (ver.note || '')
+                  + (ver.code ? '（code=' + ver.code + '）' : '')
+                  + '\n雨课堂仍按浏览器身份工作，签到照旧；关闭本窗口即可。';
+              } else {
+                msg.className = 'app-result is-err';
+                msg.textContent = '❌ 登录失败：' + (d.message || '未知原因');
+              }
+            }
+          }
+        });
+      }, 1200);
+    }
+
+    if ($('yktAppMode')) {
+      $('yktAppMode').addEventListener('click', function (ev) {
+        var t = ev.target;
+        var k = t && t.getAttribute ? t.getAttribute('data-kind') : '';
+        if (!k) { return; }
+        appKind = parseInt(k, 10) === 3 ? 3 : 1;
+        if ($('yktAppMsg')) { $('yktAppMsg').textContent = ''; }
+        appSyncMode();
+      });
+    }
+
+    if ($('yktAppSendCode')) {
+      $('yktAppSendCode').addEventListener('click', function () {
+        var phone = ($('yktAppAccount') && $('yktAppAccount').value || '').trim();
+        var msg = $('yktAppMsg');
+        if (!/^1\d{10}$/.test(phone)) {
+          if (msg) { msg.textContent = '先填 11 位手机号'; }
+          return;
+        }
+        $('yktAppSendCode').disabled = true;
+        if (msg) { msg.textContent = '正在打开人机验证…'; }
+        api('/api/ykt/applogin/sendsms', { phone: phone }).then(function (d) {
+          $('yktAppSendCode').disabled = false;
+          if (!d || !d.ok) {
+            if (msg) { msg.textContent = (d && d.error) || '发送失败'; }
+            return;
+          }
+          if (msg) { msg.textContent = ''; }
+          appOpenStage(d.page);
+        });
+      });
+    }
+
+    if ($('yktAppBtn')) {
+      $('yktAppBtn').addEventListener('click', function () {
+        appShowForm();
+        if ($('yktAppMsg')) { $('yktAppMsg').textContent = ''; }
+        openBackdrop('yktAppBackdrop');
+        if ($('yktAppAccount')) { $('yktAppAccount').focus(); }
+      });
+    }
+
+    if ($('yktAppCancel')) {
+      $('yktAppCancel').addEventListener('click', function () {
+        appStopPoll();
+        api('/api/ykt/applogin/cancel', {});
+        closeBackdrop('yktAppBackdrop');
+        appShowForm();
+      });
+    }
+
+    if ($('yktAppBack')) {
+      $('yktAppBack').addEventListener('click', function () {
+        appStopPoll();
+        api('/api/ykt/applogin/cancel', {});
+        appShowForm();
+      });
+    }
+
+    if ($('yktAppGo')) {
+      $('yktAppGo').addEventListener('click', function () {
+        var acc = ($('yktAppAccount') && $('yktAppAccount').value || '').trim();
+        var secret = appKind === 3
+          ? ($('yktAppCode') && $('yktAppCode').value || '').trim()
+          : ($('yktAppPassword') && $('yktAppPassword').value || '');
+        var msg = $('yktAppMsg');
+        if (!acc || !secret) {
+          if (msg) { msg.textContent = appKind === 3 ? '手机号和验证码都要填' : '账号和密码都要填'; }
+          return;
+        }
+        $('yktAppGo').disabled = true;
+        if (msg) { msg.textContent = '正在准备…'; }
+        api('/api/ykt/applogin/start', { account: acc, password: secret, kind: appKind }).then(function (d) {
+          $('yktAppGo').disabled = false;
+          if (!d || !d.ok) {
+            if (msg) { msg.textContent = (d && d.error) || '启动失败'; }
+            return;
+          }
+          appOpenStage(d.page);
+        });
+      });
+    }
+    $('yktLogout').addEventListener('click', function () {
+      api('/api/ykt/logout', {}).then(function () { pull(); });
+    });
+
+    $('yktCheckAll').addEventListener('click', function () {
+      var items = state.lessons.filter(function (r) { return !r.checkedAt; })
+        .map(function (r) {
+          return { lessonId: r.lessonId, classroomId: r.classroomId, name: r.name,
+                   signinStatus: r.signinStatus || 0 };
+        });
+      if (!items.length) { toast('没有需要签到的课堂'); return; }
+      state.busy = true;
+      render();
+      $('yktStatus').textContent = '正在签到 ' + items.length + ' 节…';
+      api('/api/ykt/checkin_all', { items: items }).then(function (d) {
+        state.busy = false;
+        if (!d || !d.ok) {
+          toast('签到失败：' + (d && d.error || '未知'));
+          render();
+          return;
+        }
+        var res = d.results || [];
+        var ok = res.filter(function (r) { return r.status === 'checked' || r.status === 'already'; }).length;
+        var joined = res.filter(function (r) { return r.status === 'joined'; }).length;
+        var bad = res.filter(function (r) { return !r.ok; });
+        res.forEach(function (r) {
+          var row = rowById(r.lessonId);
+          if (!row) return;
+          if (r.status === 'joined') {
+            // 进班成功但考勤里还没有签到记录：保持"未签到"，红点不灭
+            row.checkedAt = '';
+            row._state = { text: '已进班 · 待签到', cls: 'is-warn' };
+          } else if (r.ok) {
+            row.checkedAt = '刚刚';
+            delete row._state;
+          } else {
+            row._state = { text: (r.status === 'need_scan' ? '需手机扫码' : (r.detail || '失败')), cls: 'is-warn' };
+          }
+        });
+        state.lessons = d.lessons || state.lessons;
+        render();
+        toast('签到完成：成功 ' + ok
+              + (joined ? '，已进班待签到 ' + joined : '')
+              + (bad.length ? '，失败 ' + bad.length : ''), bad.length ? 'warn' : 'ok');
+      });
+    });
+
+    $('yktLessons').addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      var row = rowById(btn.closest('.ykt-row').dataset.id);
+      if (!row) return;
+      var act = btn.dataset.act;
+      if (act === 'check') {
+        btn.disabled = true;
+        btn.textContent = '签…';
+        api('/api/ykt/checkin', {
+          lessonId: row.lessonId, classroomId: row.classroomId, name: row.name,
+          signinStatus: row.signinStatus || 0
+        }).then(function (d) {
+          btn.textContent = '签到';
+          if (d && d.status === 'joined') {
+            // 只是进了班，老师还没发签到——别显示成已签到
+            row.checkedAt = '';
+            row._state = { text: '已进班 · 待签到', cls: 'is-warn' };
+            toast((row.name || '') + ' 已进班，老师还没发起签到', 'warn');
+          } else if (d && d.ok) {
+            row.checkedAt = '刚刚';
+            delete row._state;
+            toast((row.name || '') + ' 已签到', 'ok');
+          } else {
+            row._state = {
+              text: (d && d.status === 'need_scan') ? '需手机扫码' : ((d && d.detail) || '失败'),
+              cls: 'is-warn'
+            };
+            toast('签到失败：' + ((d && d.detail) || (d && d.error) || '未知'), 'warn');
+          }
+          render();
+        });
+      } else if (act === 'pres') {
+        openPres(row);
+      } else if (act === 'q') {
+        openQuestions(row);
+      } else if (act === 'mark') {
+        api('/api/ykt/mark', { lessonId: row.lessonId, on: !row.checkedAt }).then(function () {
+          row.checkedAt = row.checkedAt ? '' : '手动';
+          render();
+        });
+      }
+    });
+
+    $('yktPresClose').addEventListener('click', function () { closeBackdrop('yktPresBackdrop'); });
+
+    $('yktQClose').addEventListener('click', function () {
+      closeBackdrop('yktQBackdrop');
+      if (qTimer) { clearInterval(qTimer); qTimer = null; }
+    });
+    $('yktQReload').addEventListener('click', function () { loadQuestions(qLesson); });
+
+    $('yktQStage').addEventListener('click', function (e) {
+      var btn = e.target.closest('button[data-act="send"]');
+      if (!btn) return;
+      var pid = btn.dataset.pid;
+      var input = document.querySelector('[data-in="' + pid + '"]');
+      var note = document.querySelector('[data-note="' + pid + '"]');
+      var text = (input && input.value || '').trim();
+      if (!text) {
+        if (note) { note.textContent = '先把答案填进去'; note.className = 'q-note is-err'; }
+        return;
+      }
+      btn.disabled = true;
+      if (note) { note.textContent = '提交中…'; note.className = 'q-note'; }
+      api('/api/ykt/answer', {
+        lessonId: qLesson, problemId: pid,
+        type: parseInt(btn.dataset.type, 10) || 1,
+        text: text, dt: parseInt(btn.dataset.dt, 10) || 0
+      }).then(function (d) {
+        btn.disabled = false;
+        if (!note) return;
+        if (d && d.ok) {
+          note.textContent = (d.note || '提交成功') + (d.retried ? '（已走补交通道）' : '');
+          note.className = 'q-note is-ok';
+          var row = rowById(qLesson);
+          (row && row._questions || []).forEach(function (q) {
+            if (q.problemId === pid) q.answered = true;
+          });
+          tickQuestions();
+        } else {
+          note.textContent = '失败：' + ((d && d.error) || '未知');
+          note.className = 'q-note is-err';
+        }
+      });
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (sideOpen && !$('yktQBackdrop').classList.contains('open')
+          && !$('yktPresBackdrop').classList.contains('open')) {
+        setSide(false);
+        return;
+      }
+      if ($('yktQBackdrop').classList.contains('open')) {
+        closeBackdrop('yktQBackdrop');
+        if (qTimer) { clearInterval(qTimer); qTimer = null; }
+        return;
+      }
+      if ($('yktPresBackdrop').classList.contains('open')) { closeBackdrop('yktPresBackdrop'); return; }
+    });
+
+    // 点遮罩关闭（课件层除外，避免误触关掉正在看的页）
+    ['yktAppBackdrop'].forEach(function (id) {
+      var el = $(id);
+      if (!el) { return; }
+      el.addEventListener('click', function (e) {
+        if (e.target === this) {
+          if (id === 'yktAppBackdrop') { appStopPoll(); appShowForm(); }
+          closeBackdrop(id);
+        }
+      });
+    });
+  }
+
+  /* ---------------------------------------------------------------- 启动 */
+  function boot() {
+    bind();
+    wireTabs();
+    pull();
+    // 不管你停在哪个视图，后台都盯着——签到是有时间窗的，错过就没了
+    setInterval(pull, 15000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+
+  wireSideGrip();
+
+  window.HFUTYkt = { setSide: setSide, toggleSide: toggleSide, refresh: refresh,
+                    setWidth: applySideWidth, showPanel: showPanel,
+                    render: render, state: state };
+})();

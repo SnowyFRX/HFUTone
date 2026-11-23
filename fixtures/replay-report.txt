@@ -1,0 +1,61 @@
+夹具目录: fixtures
+
+[PASS] pre-info.json 可读
+[PASS] pre-info code==0  实际 0
+[PASS] on-lesson.json 可读
+[PASS] on-lesson code==0  实际 0
+[PASS] 空课堂列表解析为 0 条  实际 0
+[PASS] 单课时解析出 1 条  实际 1
+[PASS] lessonId 取值  实际 2299123
+[PASS] courseName 取值  实际 形势与政策
+[PASS] classroomName 取值  实际 四教 402
+[PASS] 两课时解析出 2 条  实际 2
+[PASS] 签到成功 code==0
+[PASS] 签到成功不判成已签到
+[PASS] 「已签到, 请勿重复签到」判成已签到  msg=已签到, 请勿重复签到
+[PASS] 「您已签到」判成已签到  msg=您已签到
+[PASS] 登录失效 code==401  实际 401
+[PASS] 不在课堂 code==1006  实际 1006
+[PASS] 网关 HTML 判为非 JSON  实际 
+[PASS] 网关 HTML 能被识别成网页
+[PASS] 坏 JSON 判为解析失败
+[PASS] 坏 JSON 有错误定位  对象的键必须是字符串 (第 1 行第 25 列, 偏移 24)  附近: "msg": "OK",,} | len=26 head={"code": 0, "msg": "OK",,} tail={"code": 0, "msg": "OK",,}
+       定位: 对象的键必须是字符串 (第 1 行第 25 列, 偏移 24)  附近: "msg": "OK",,} | len=26 head={"code": 0, "msg": "OK",,} tail={"code": 0, "msg": "OK",,}
+[PASS] 课件清单解析出 2 个  实际 2  
+[PASS] 课件 id 取值  实际 pres_8801
+[PASS] 课件标题取值  实际 第三章 电磁感应
+[PASS] 课件页数 3  实际 3  
+[PASS] 课件标题  实际 第三章 电磁感应
+[PASS] 绝对地址保持原样  https://qn-scd1.yuketang.cn/ppt/1.png
+[PASS] 相对地址补成 CDN 绝对路径  https://qn-scd1.yuketang.cn/ppt/2.png
+[PASS] 补交通道成功判为成功  null code=0
+[PASS] 码 50028 判为已作答
+[PASS] 文案 ALREADY_ANSWERED
+[PASS] 文案 已作答
+[PASS] 文案 已提交
+[PASS] 50026 不算已作答
+[PASS] code 0 不算已作答
+[PASS] 签到夹具里的 lessonToken  LT_9f3a1c
+[PASS] rollcall 有记录 => mine=true  n=1 mine=True 2688=>56088391
+[PASS] 扫码成功头里取出 sessionid+csrftoken  sessionid=qr_ok_123; csrftoken=qr_csrf_456
+[PASS] 响应头与 JSON body 正确分家  body={"code":0}
+[PASS] 只有 Set-Auth 时转成 Bearer  Bearer BEAR_1
+[PASS] 多选去重+排序+大写  ["A","B","C"]
+[PASS] 填空拆成数组  ["3.5","牛顿"]
+[PASS] 主观题结构化 content+pics 占位  {"content":"因为所以","pics":[{"pic":"","thumb":""}],"videos":[]}
+[PASS] 单选大写
+[PASS] 毫秒时间转秒  1763600000
+[PASS] 没填时间回退下发时间
+[PASS] 50026 自动改走补交
+[PASS] CLOSED 文案触发补交
+[PASS] 50028 不触发补交
+[PASS] 倒计时 mm:ss  剩 00:30
+[PASS] 过点判超时  已超时
+[PASS] 不限时不算超时  不限时
+[PASS] 已作答优先于倒计时  已作答
+[PASS] TrimCookie 归一化  csrftoken=xyz; sessionid=abc
+[PASS] TrimCookie 空串
+[PASS] 缺失夹具返回 404  实际 404
+[PASS] 回放命中 pre-info  HTTP 200
+
+全部通过

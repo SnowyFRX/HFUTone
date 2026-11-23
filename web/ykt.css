@@ -1,0 +1,1210 @@
+/* ============================================================================
+   HFUTone · 雨课堂一栏
+   沿用 app.css 的奶油纸面体系：同一套变量、同一套圆角与发丝边框。
+   这一份只管"雨课堂"这个 tab 里出现的元素，不改直播课堂的任何样式。
+   ========================================================================== */
+
+/* ------------------------------------------------------------ 焦点环
+   这台 QtWebEngine 的 Chromium 不认 :focus-visible —— 用它会报
+   "not a valid selector"，而 CSS 的选择器列表里只要有一个无效，整条规则就被丢弃。
+   之前写的 ":focus, :focus-visible { outline: none }" 因此整条没生效，
+   点击按钮留下的是 UA 默认的 :focus 环，它取系统强调色（这台机器是橙金）。
+   下面只用 :focus，一个 :focus-visible 都不带。 */
+:focus {
+  outline: none;
+  -webkit-focus-ring-color: transparent;
+}
+
+button:focus,
+summary:focus,
+a:focus,
+[role="tab"]:focus {
+  outline: 0 none;
+  -webkit-focus-ring-color: transparent;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: rgba(28, 28, 28, 0.35);
+  box-shadow: none;
+}
+
+/* 账号弹层的输入框聚焦光晕原来是珊瑚色（--accent），一并改中性，
+   免得点哪儿都是一圈暖色。 */
+.field input:focus {
+  border-color: var(--hairline-strong);
+  box-shadow: none;
+}
+
+:root {
+  --side-w: 640px;              /* 侧栏默认宽度，卡片里的 PPT 画面跟着它变 */
+  /* 雨课堂/学习通 面板区的固定高度。写死是为了切换时下方的直播画面不变形；
+     窗口矮的时候按视口缩，别把画面顶出屏幕。 */
+  --side-panel-h: clamp(220px, 38vh, 380px);
+}
+
+/* ------------------------------------------------------------ 分栏
+   直播课堂是底座——不管老师用不用雨课堂，HFUT 都会推流；雨课堂只是按需
+   出现的附加层。所以两者不是平级的 tab（那暗示二选一），而是"主区 + 侧栏"：
+   直播永远在，雨课堂收起来时一点不占地方，需要时滑出来。
+
+   开合走 flex-basis 过渡而不是 display:none 硬切。面板内部宽度固定，动画
+   只"揭开/盖回"，内容不做重排——重排会让课程行高度跳动，那就廉价了。 */
+.split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 0;                 /* 间距靠 .side 的 padding-left 过渡，收起时才是 0 */
+}
+
+.split > .workspace {
+  flex: 1;
+  min-width: 0;
+}
+
+.side {
+  /* 宽度在 :root 上，拖分隔条时改这一个变量就够了 */
+  --side-ease: cubic-bezier(.22, .61, .36, 1);
+  position: relative;
+  flex: 0 0 0px;
+  width: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding-left: 0;
+  opacity: 0;
+  transform: translateX(10px);
+  visibility: hidden;               /* 收起后内部按钮不再吃 Tab 键 */
+  transition:
+    flex-basis .38s var(--side-ease),
+    width .38s var(--side-ease),
+    padding-left .38s var(--side-ease),
+    opacity .24s ease-out,
+    transform .38s var(--side-ease),
+    visibility 0s linear .38s;      /* 等收起动画跑完再撤走 */
+}
+
+.side.is-open {
+  flex-basis: var(--side-w);
+  width: var(--side-w);
+  padding-left: var(--s4);
+  opacity: 1;
+  transform: none;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* 分隔线自己淡，收起时不会留一道孤零零的竖线 */
+/* 拖这条改侧栏宽度：PPT 画面宽度 = 侧栏宽 - 内边距，
+   想让画面更大就把它往左拉。收起时 .side 是 visibility:hidden，拖不到。 */
+.side-grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.side-grip::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 2px;
+  height: 44px;
+  margin-top: -22px;
+  border-radius: 1px;
+  background: var(--hairline-strong);
+  opacity: 0;
+  transition: opacity .18s ease-out;
+}
+
+.side-grip:hover::after { opacity: .4; }
+
+/* 拖的时候要临时关掉过渡，否则宽度总是慢半拍才跟上 */
+body.is-side-drag { cursor: col-resize; user-select: none; }
+body.is-side-drag .side,
+body.is-side-drag .side > .side-shell { transition: none; }
+
+.side::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--hairline);
+  opacity: 0;
+  transition: opacity .3s ease-out .06s;
+}
+
+.side.is-open::before { opacity: 1; }
+
+/* 卡片本身定宽：展开过程是"揭开"，不是把里面的文字挤成一条 */
+.side > .side-shell {
+  width: calc(var(--side-w) - var(--s4));
+}
+
+/* ------------------------------------------- 雨课堂 / 学习通 合成一张卡
+   切换条放在卡片内部顶部，整张卡高度固定（--side-panel-h）。
+   之前把切换条单独摆一条，它自己占几十像素，下面的直播画面就被压小了；
+   收进卡片以后，卡的总高不变，画面拿到的空间反而多了一点。 */
+.side-shell {
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--side-w) - var(--s4));
+  height: var(--side-panel-h);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-xl);
+  background: var(--canvas);
+  box-shadow: 0 1px 2px rgba(28, 28, 28, .03);
+  overflow: hidden;
+  transform: translateX(8px);
+  transition: transform .38s var(--side-ease);
+}
+
+.side.is-open .side-shell { transform: none; }
+
+.side-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  margin: var(--s3) var(--s4) 0;
+  padding: 3px;
+  border-radius: var(--r-full);
+  background: var(--tint-4);
+}
+
+.side-tabs button {
+  flex: 1;
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.side-tabs button:hover { color: var(--body-strong); }
+
+.side-tabs button.is-on {
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(28, 28, 28, .08);
+}
+
+.side-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* 卡片自己不出滚动条：滚动交给里面的 .ykt-list，
+     免得右边缘挂一条灰条，看着像内容没放完 */
+  overflow: hidden;
+}
+
+/* 卡片外观归 .side-shell，内层面板只留排版，别再套一层边框 */
+.side-panels > .ykt-panel {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  padding: var(--s3) var(--s5) var(--s3);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: sidePanelIn .24s var(--side-ease) both;
+}
+
+/* 标题和登录状态同一行：状态贴右边，标题占左边 */
+.ykt-titlerow {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s3);
+  width: 100%;
+  min-width: 0;
+}
+
+.ykt-titlerow .ykt-title { min-width: 0; }
+
+.ykt-titlerow .bar {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  gap: var(--s2);
+  justify-content: flex-end;
+}
+
+/* 挪到标题右边之后它是辅助信息，比原来正文那一行收一号、淡一点 */
+.ykt-titlerow .bar .status {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ykt-titlerow .bar .count {
+  margin-left: var(--s2);
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 身份标：web / App。app 那个用绿色，一眼区分"登录成功"和"身份生效" */
+.ykt-titlerow .bar .identity {
+  margin-left: var(--s2);
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--hairline, rgba(28, 28, 28, 0.12));
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.ykt-titlerow .bar .identity.is-app {
+  border-color: rgba(47, 125, 79, 0.45);
+  background: rgba(47, 125, 79, 0.08);
+  color: #2f7d4f;
+}
+
+/* App 登录的结果块：多行、大字，别让人错过「登录成功但身份不可用」 */
+.app-result {
+  white-space: pre-line;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.65;
+  text-align: left;
+  border: 1px solid transparent;
+}
+
+.app-result.is-ok {
+  color: #2f7d4f;
+  background: rgba(47, 125, 79, 0.07);
+  border-color: rgba(47, 125, 79, 0.28);
+}
+
+.app-result.is-warn {
+  color: #8a5a12;
+  background: rgba(196, 138, 32, 0.08);
+  border-color: rgba(196, 138, 32, 0.3);
+}
+
+.app-result.is-err {
+  color: #c64545;
+  background: rgba(198, 69, 69, 0.07);
+  border-color: rgba(198, 69, 69, 0.28);
+}
+
+/* 扫码弹层里的补充说明：小一号、更淡，不抢二维码的注意力 */
+.qr-note {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+/* App 登录：密码 / 验证码 两种方式的分段控件 */
+.seg {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.seg button {
+  flex: 1 1 0;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--hairline, rgba(28, 28, 28, 0.14));
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.seg button.on {
+  color: #fff;
+  background: #1c1c1c;
+  border-color: #1c1c1c;
+}
+
+/* 验证码一行：输入框 + 发送按钮 */
+.code-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* .cx-field 自己带 display:flex，会压过浏览器默认的 [hidden]{display:none}，
+   于是切到「验证码登录」时密码框还杵在那儿。这条必须带 !important。 */
+#yktAppForm .cx-field[hidden] {
+  display: none !important;
+}
+
+/* 人机验证区同理：它是 hidden 的，但里面的 iframe 给了布局，压掉了默认规则，
+   结果一打开弹层就露出一块空白大方框 + 「正在打开人机验证…」。 */
+#yktAppForm[hidden],
+#yktAppStage[hidden] {
+  display: none !important;
+}
+
+.code-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.code-row button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+/* 面板自己设了 display:flex，会压过浏览器默认的 [hidden]{display:none}，
+   于是没选中的那个面板其实还排在下面（只是被 overflow 裁掉了）。
+   补一条，让 hidden 真的把它从布局里摘掉。 */
+.side-panels > .ykt-panel[hidden] { display: none !important; }
+
+@keyframes sidePanelIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* 课程行依次入场：只给前几行延迟，行多了拖沓 */
+@keyframes yktRowIn {
+  from { opacity: 0; transform: translateX(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.side.is-open .ykt-row { animation: yktRowIn .34s var(--side-ease) both; }
+.side.is-open .ykt-row:nth-child(1) { animation-delay: .06s; }
+.side.is-open .ykt-row:nth-child(2) { animation-delay: .10s; }
+.side.is-open .ykt-row:nth-child(3) { animation-delay: .14s; }
+.side.is-open .ykt-row:nth-child(4) { animation-delay: .18s; }
+
+/* 窄窗口时侧栏改成浮层：横向推入 + 轻微缩放，别把直播区挤扁 */
+@media (max-width: 1180px) {
+  .side {
+    position: absolute;
+    right: var(--s5);
+    top: 84px;
+    bottom: calc(var(--s5) + 56px);
+    flex-basis: auto;
+    width: min(var(--side-w), 88vw);
+    padding: var(--s4);
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-xl);
+    box-shadow: 0 18px 48px rgba(20, 18, 14, .20);
+    z-index: 30;
+    opacity: 0;
+    transform: translateX(26px) scale(.986);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity .24s ease-out,
+      transform .36s var(--side-ease),
+      visibility 0s linear .36s;
+  }
+
+  .side.is-open {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    transition-delay: 0s;
+    pointer-events: auto;
+  }
+
+  .side::before { display: none; }
+
+  .side > .side-shell {
+    width: auto;
+  }
+}
+
+/* 顶栏开关上的未签到红点 */
+#btnYkt { position: relative; }
+
+#btnYkt.is-on {
+  background: var(--tint-6);
+  border-color: var(--hairline-strong);
+}
+
+.badge {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c64545;
+  box-shadow: 0 0 0 2px var(--canvas);
+}
+
+/* 侧栏里的面板要收窄：按钮换行、行布局改成两行 */
+.side .ykt-panel { padding: var(--s3) var(--s5) var(--s4); }
+
+.side .ykt-head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s3);
+}
+
+.side .ykt-actions {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+/* 侧栏只有 300 多像素，三个按钮挤一行会把"刷新课程"压断，让它按需换行 */
+.side .ykt-actions button {
+  flex: 1 1 auto;
+  min-width: 92px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.side .ykt-title h2 { font-size: 18px; }
+
+.side .ykt-row {
+  grid-template-columns: 1fr auto;
+  row-gap: var(--s2);
+}
+
+/* 侧栏窄，meta 里的"学号 · 教室 · 老师"别折成一两个字的断行 */
+.side .ykt-row-meta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side .ykt-row-btns {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------ 雨课堂面板 */
+.ykt-panel {
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-xl);
+  background: var(--canvas);
+  padding: var(--s4) var(--s5) var(--s4);
+  box-shadow: 0 1px 2px rgba(28, 28, 28, .03);
+}
+
+.ykt-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  flex: 0 0 auto;              /* 标题区钉住，滚动只发生在下面的列表里 */
+}
+
+/* 状态行搬进标题行之后，别再带原来那圈上下外边距 */
+.ykt-head .bar { margin: 0; }
+
+.ykt-title h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+
+.ykt-title .eyebrow {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: .14em;
+  color: var(--muted);
+}
+
+.ykt-actions {
+  display: flex;
+  gap: var(--s2);
+  flex-wrap: wrap;
+}
+
+.ykt-actions button,
+.ykt-foot button {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--canvas);
+  color: var(--body-strong);
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease, transform .08s ease;
+}
+
+.ykt-actions button:hover,
+.ykt-foot button:hover { background: var(--tint-4); border-color: var(--hairline-strong); }
+.ykt-actions button:active,
+.ykt-foot button:active { transform: translateY(1px); }
+.ykt-actions button:disabled,
+.ykt-foot button:disabled { opacity: .45; cursor: default; }
+
+.ykt-foot button.primary {
+  background: var(--ink);
+  color: var(--on-dark);
+  border-color: var(--ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .14);
+}
+.ykt-foot button.primary:hover { background: #000; }
+
+/* 状态条复用 app.css 的 .bar，只补一点间距 */
+/* 只在状态行还是面板直接子元素时才要外边距；搬进标题行后由 .ykt-titlerow 管 */
+.ykt-panel > .bar { margin: var(--s4) 0 var(--s3); }
+
+/* ------------------------------------------------------------ 课程行 */
+.ykt-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--hairline);
+  /* 卡片高度固定，列表吃掉剩下的空间；内容多了在这里滚，
+     滚动条本身藏起来（还能滚，只是不占那一条视觉） */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.ykt-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+.ykt-empty {
+  padding: var(--s3) 0;          /* 原来是 s7（48px），空态占半屏，把 PPT 挤下去了 */
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ykt-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: var(--s4);
+  padding: var(--s3) 2px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.ykt-row:last-child { border-bottom: 0; }
+
+.ykt-row-main { min-width: 0; }
+
+.ykt-row-name {
+  font-size: 14px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ykt-row-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.ykt-row-state {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: var(--r-full);
+  white-space: nowrap;
+}
+
+.ykt-row-state.is-off { background: var(--tint-4); color: var(--muted); }
+.ykt-row-state.is-on { background: var(--live-soft); color: var(--live); }
+.ykt-row-state.is-warn { background: var(--accent-soft); color: var(--accent-deep); }
+
+.ykt-row-btns { display: flex; gap: var(--s2); }
+
+.ykt-row-btns button {
+  appearance: none;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--canvas);
+  color: var(--body-strong);
+  cursor: pointer;
+}
+.ykt-row-btns button:hover { background: var(--tint-4); border-color: var(--hairline-strong); }
+.ykt-row-btns button:disabled { opacity: .4; cursor: default; }
+
+.ykt-foot {
+  display: flex;
+  gap: var(--s2);
+  justify-content: flex-end;
+  margin-top: var(--s3);
+  flex: 0 0 auto;              /* 底栏钉住，别被列表挤走 */
+}
+
+/* ------------------------------------------------------------ 扫码 */
+.ykt-qr-box {
+  display: flex;
+  justify-content: center;
+  margin: var(--s4) 0 var(--s2);
+}
+
+.ykt-qr-box img {
+  width: 220px;
+  height: 220px;
+  object-fit: contain;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  background: #fff;
+  padding: 6px;
+}
+
+#yktCookieInput {
+  width: 100%;
+  margin-top: var(--s3);
+  padding: var(--s3);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--body-strong);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--canvas);
+  resize: vertical;
+}
+
+#yktQrMsg { color: var(--muted); }
+#yktQrMsg.is-err { color: #b23c3c; }
+
+/* ------------------------------------------------------------ 课件 */
+.backdrop.ykt-pres .pres-sheet {
+  width: min(1100px, 94vw);
+  height: min(88vh, 900px);
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+  border-radius: var(--r-xl);
+  box-shadow: 0 24px 60px rgba(20, 18, 14, .28);
+  overflow: hidden;
+}
+
+.pres-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.pres-head h2 { margin: 0; font-size: 15px; color: var(--ink); flex: 1; }
+.pres-count { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+
+.pres-head button {
+  appearance: none;
+  border: 1px solid var(--hairline);
+  background: var(--canvas);
+  color: var(--body-strong);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pres-stage {
+  flex: 1;
+  overflow: auto;
+  padding: var(--s4);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--s3);
+  background: var(--tint-3);
+}
+
+.pres-stage img {
+  width: 100%;
+  display: block;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: #fff;
+}
+
+.pres-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  padding: var(--s7) 0;
+}
+
+/* ------------------------------------------------------------ 随堂题 */
+.pres-stage.q-list {
+  display: block;
+  background: var(--tint-3);
+}
+
+.q-card {
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s3);
+}
+
+.q-card:last-child { margin-bottom: 0; }
+
+.q-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.q-badge {
+  font-family: var(--font-sans);
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  background: var(--tint-6);
+  color: var(--body-strong);
+}
+
+.q-badge.is-closed { background: var(--accent-soft); color: var(--accent-deep); }
+.q-badge.is-done { background: var(--live-soft); color: var(--live); }
+.q-left { margin-left: auto; }
+.q-left.is-urgent { color: var(--accent-deep); font-weight: 600; }
+
+.q-body {
+  display: flex;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  align-items: center;
+}
+
+.q-body input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--canvas);
+  color: var(--body-strong);
+}
+
+.q-body input:focus {
+  outline: none;
+  border-color: var(--hairline-strong);
+}
+
+.q-body button {
+  appearance: none;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--on-dark);
+  cursor: pointer;
+}
+
+.q-body button:disabled { opacity: .4; cursor: default; }
+
+.q-note {
+  margin: var(--s2) 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.q-note.is-ok { color: var(--live); }
+.q-note.is-err { color: #b23c3c; }
+/* ------------------------------------------------------------ 直播画面卡片
+   PPT 流为什么不用 <video src="...m3u8">：QtWebEngine 5.15 是 Chromium 83，
+   canPlayType('video/mp4; codecs="avc1..."') 返回空串，MSE 也不支持 avc1/aac，
+   学校的流全是 H.264+AAC，直接播就是一帧都没有。
+   所以后端用 ffmpeg 解成 MJPEG，页面上 canvas 逐帧画：
+   画质由 -q:v 控制，canvas 内部分辨率等于源分辨率，文字不会糊。 */
+
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.side > .side-shell {
+  /* 空间不够时先压这一块：面板内部自己滚，PPT 卡片保持完整 */
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.live-card {
+  width: calc(var(--side-w) - var(--s4));
+  /* 默认高度跟着画面走（16:9，不留黑边）；挤到没地方时允许收缩，
+     里面那张 canvas 会自己按比例缩，不会把画面裁掉。 */
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-xl);
+  background: var(--canvas);
+  box-shadow: 0 1px 2px rgba(28, 28, 28, .03);
+  transform: translateX(8px);
+  opacity: 0;
+  transition: transform .38s var(--side-ease), opacity .24s ease-out;
+}
+
+.side.is-open .live-card {
+  transform: none;
+  opacity: 1;
+  transition-delay: .12s;
+}
+
+.live-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4) var(--s2);
+}
+
+.live-head .eyebrow { margin: 0 0 2px; }
+.live-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.live-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  padding-top: 2px;
+}
+
+.live-stage {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: 0 var(--s4);
+  border-radius: var(--r-md);
+  background: #14130f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#liveCanvas {
+  display: block;
+  width: auto;          /* 尺寸全交给 max-*：满宽、或高度不够时按比例缩 */
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  visibility: hidden;
+}
+
+.live-stage.is-live #liveCanvas { visibility: visible; }
+
+.live-empty {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;   /* 别用 inset 简写，Chromium 83 不认 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  padding: var(--s4);
+  text-align: center;
+  background: var(--canvas);
+}
+
+.live-stage.is-live .live-empty { display: none; }
+
+/* app.css 里 `button { display: inline-flex }` 是作者样式，优先级高于 UA 的
+   `[hidden] { display: none }`，所以 hidden 属性在这几个控件上等于没写
+   （「停止画面」在停流后还挂着就是这个原因）。这里把话说死。 */
+.live-card [hidden] { display: none !important; }
+
+/* 没画面时底栏只有一个「—」，留着反而像坏了 */
+.live-stage:not(.is-live) ~ .live-foot { display: none; }
+
+/* 卡片宽度只有 310px，1080p 的 PPT 小字得靠放大：点一下铺满整个窗口。
+   放大层必须挂在 body 下 —— .side 有 overflow:hidden 和过渡用的 transform，
+   fixed 子元素会被它当成 containing block，铺不开。 */
+.live-stage.is-live { cursor: zoom-in; }
+
+.live-zoom {
+  position: fixed;
+  top: 22px; right: 22px; bottom: 22px; left: 22px;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-lg);
+  background: #0d0c0a;
+  box-shadow: 0 30px 90px rgba(20, 18, 14, .45);
+  cursor: zoom-out;
+}
+
+.live-zoom[hidden] { display: none; }
+
+#liveZoomCanvas {
+  display: block;
+  max-width: calc(100vw - 44px);
+  max-height: calc(100vh - 44px);
+  width: auto;
+  height: auto;
+}
+
+.live-empty p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--body);
+}
+
+.live-lag {
+  margin-left: auto;
+  padding-right: var(--s3);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s2) var(--s4) var(--s3);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------ 设置弹层 */
+/* ------------------------------------------------- App 登录（方案 A）
+   里面嵌的是本地人机验证页，iframe 得给足高度，否则验证码弹不出来。 */
+.sheet-app-login { width: min(520px, 100%); }
+
+/* 扫码弹层里那个「以 App 身份登录」开关 */
+.qr-app-row {
+  margin: 0 0 var(--s3);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .6);
+}
+
+.sheet-app-login #yktAppStage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.sheet-app-login iframe {
+  width: 100%;
+  height: 420px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: #faf9f7;
+}
+
+/* ------------------------------------------------------- 设置面板
+   设置项多起来了，单列一竖排会顶出屏幕。改成宽版两栏：
+   每组自己一小块，左两块右两块，整屏能放下。 */
+.sheet-wide {
+  width: min(880px, 100%);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sheet-wide .lead { margin-bottom: var(--s4); }
+
+.set-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;            /* 给滚动条留一点，别压住边框 */
+  min-height: 0;
+}
+
+/* 窗口窄的时候退回单列 */
+@media (max-width: 780px) {
+  .set-grid { grid-template-columns: 1fr; }
+}
+
+.set-group {
+  margin: 0;                     /* 间距交给 .set-grid 的 gap */
+  padding: var(--s1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .5);
+  align-self: start;             /* 别被同行最高的那块拉长 */
+}
+
+/* 分组说明：比 .set-title 更小的辅助文字，放在标题下面 */
+.set-hint {
+  margin: 0 var(--s3) var(--s2);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* 设置里并排的两个输入框（经纬度） */
+.cx-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  padding: 0 var(--s3) var(--s2);
+}
+
+.set-group .cx-field { padding: 0 var(--s3) var(--s2); }
+.set-group .cx-row2 .cx-field { padding: 0; }
+
+/* 两栏里每行更紧凑：标题一行、说明一行，别把行高撑起来 */
+.set-group .set-row {
+  padding: var(--s2) var(--s3);
+  align-items: flex-start;
+}
+
+.set-group .set-row b {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.set-group .set-row em {
+  margin-top: 1px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.set-group .set-title { margin-top: var(--s1); }
+
+/* radio 别被 .set-row input 的复选框尺寸带偏 */
+.set-row input[type="radio"] {
+  appearance: auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  accent-color: var(--ink);
+}
+
+/* 底栏钉在面板底部，不跟着内容滚 */
+.sheet-wide .sheet-actions { flex: 0 0 auto; padding-top: var(--s3); }
+
+.set-title {
+  margin: var(--s2) var(--s3) var(--s1);
+  font-size: 11px;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.set-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s3);
+  padding: 10px var(--s3);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.set-row:hover { background: var(--tint-4); }
+
+.set-row input {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin: 3px 0 0;
+  accent-color: var(--ink);
+}
+
+.set-row span { display: block; min-width: 0; }
+.set-row b {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.set-row em {
+  display: block;
+  margin-top: 2px;
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------- 学习通签到一栏
+   和雨课堂共用 .ykt-panel / .ykt-row 那一套骨架，这里只补它没有的：
+   活动类型小标签、登录表单。 */
+.cx-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: var(--tint-4);
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  vertical-align: 1px;
+}
+
+.cx-form { display: flex; flex-direction: column; gap: var(--s3); }
+
+.cx-field { display: flex; flex-direction: column; gap: 6px; }
+
+.cx-field span {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.cx-field input {
+  appearance: none;
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline-strong);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.cx-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+@media (max-width: 1180px) {
+  .side { overflow-y: auto; }
+  .live-card { width: auto; }
+}
