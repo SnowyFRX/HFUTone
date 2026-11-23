@@ -491,8 +491,17 @@ class Cx:
                 continue
             start = _int(a.get('startTime'), 0)
             end = _int(a.get('endTime'), 0)
-            # 窗口判进行中。endTime 缺失的（少见）只看 now >= start。
-            in_window = bool(start) and (start <= now and (not end or now <= end))
+            st = _int(a.get('status'), 0)
+            # 窗口判进行中。endTime 有就用窗口；没有（部分活动不给
+            # endTime，实测商益学的老位置签到就是 0）只能信 status：
+            # 1=进行中、2=已结束。早先「没 endTime 就当进行中」会把
+            # 一堆早已截止的历史签到全放进来。
+            if not start:
+                continue
+            if end:
+                in_window = start <= now <= end
+            else:
+                in_window = (st == 1) and (start <= now)
             if not in_window:
                 continue
             row = merged.get(aid)

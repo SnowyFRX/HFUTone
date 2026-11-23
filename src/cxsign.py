@@ -197,13 +197,24 @@ class CxSigner:
         if need_face and status != 1:
             missing.append('人脸')
 
+        # 截止时间：活动列表没给 endTime 的（实测商益学老位置签到是 0），
+# 用 active_info 的 starttime + createPageTimeLong 推出来。推出来了
+# 前端才能把已截止的剔掉，canAuto 也不会把过期签到算进去。
+        end_ts = cx._int(act.get('endTime'), 0)
+        if not end_ts:
+            st0 = cx._int(info.get('starttime'), 0)
+            dur = cx._int(info.get('createPageTimeLong'), 0)
+            if st0 and dur:
+                end_ts = st0 + dur
+        expired = bool(end_ts) and time.time() * 1000 > end_ts
+
         # 位置签到只有在设置里配了坐标才算能自动——没坐标的话
         # 一键签到跑到它那儿必然停在「缺位置」，不如老实标成要输入。
         loc = self.default_location or {}
         has_loc = bool(str(loc.get('address') or '') and loc.get('lat') is not None
                        and loc.get('lng') is not None)
         can_auto = (status == 0 and sign_type in AUTO_TYPES
-                    and not need_captcha
+                    and not need_captcha and not expired
                     and (sign_type != 'location' or has_loc))
         if sign_type == 'location' and not has_loc and status == 0 and '位置' not in missing:
             missing.append('位置')
@@ -218,7 +229,7 @@ class CxSigner:
             'desc': act['desc'],
             'url': act['url'],
             'startTime': act['startTime'],
-            'endTime': act.get('endTime') or 0,
+            'endTime': end_ts,
             'signType': sign_type,
             'status': status,
             'statusText': cx.STATUS_TEXT.get(status, '未签到' if status == 0 else ''),
