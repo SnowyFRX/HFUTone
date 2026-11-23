@@ -646,23 +646,36 @@ def _judge(r, active_id: str) -> tuple[bool, str]:
         return False, '已过截止时间'
     if text.startswith('validate'):
         return False, text                     # 交给上层走验证码
+    if text.startswith('签到失败['):
+        # 90002 是手势/签到码不对，带方括号的码原样给出去便于排查
+        return False, text
     if not text:
         return False, f'签到无响应（HTTP {r.status}）'
     return False, text
 
 
-def _submit(self, form: dict, referer: str) -> tuple[bool, str]:
+def _submit(self, form: dict, referer: str, method: str = 'GET') -> tuple[bool, str]:
     """提交签到并翻译结果。
 
     接口回的是纯文本，不是 JSON：
       success                成功
       success2               已过截止时间
+      签到失败[90002]        手势/签到码不对（或过期）
       签到失败，请重新扫描。 二维码过期
-      validate_xxx           要验证码，xxx 是 enc2（二维码那路会带）
+      validate_xxx           要验证码，xxx 是 enc2
+
+    **一律用 GET**。实测（2026-11-23）：同一套字段 POST 给
+    /pptSign/stuSignajax 会被 tengine 直接打 500 HTML，GET 则正常
+    返回业务文案。位置签到、手势签到、普通签到都是这个规矩。
     """
-    r = core.request('POST', SIGN_URL, cookie=self.cookie, form=form,
-                     referer=referer, extra_headers=self.headers,
-                     timeout=25, tag='cx-sign')
+    if method.upper() == 'GET':
+        url = SIGN_URL + '?' + urllib.parse.urlencode(form)
+        r = core.request('GET', url, cookie=self.cookie, referer=referer,
+                         extra_headers=self.headers, timeout=25, tag='cx-sign')
+    else:
+        r = core.request('POST', SIGN_URL, cookie=self.cookie, form=form,
+                         referer=referer, extra_headers=self.headers,
+                         timeout=25, tag='cx-sign')
     return _judge(r, str(form.get('activeId') or ''))
 
 
@@ -723,6 +736,7 @@ def sign_location(self, course_id: str, active_id: str, address: str,
         form['faceEnc'] = face_enc
     _, result = self.location_payload(address, lat, lng)
     form['locationResult'] = result
+    # _submit 默认 GET——位置签到 POST 会被打 500，见 _submit 的实测记录
     return _submit(self, form, referer)
 
 
