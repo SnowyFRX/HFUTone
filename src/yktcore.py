@@ -27,11 +27,15 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -322,6 +326,182 @@ def _replay(url: str, with_headers: bool) -> Resp:
 
 # ---------------------------------------------------------------------- curl
 
+def _use_curl() -> bool:
+    """能不能用外部 curl。Android(Termux/Chaquopy) 上没有 curl，必须走纯 Python。
+
+    YKT_NO_CURL=1 可以强制走纯 Python，方便本地对比两条链路的行为。
+    """
+    if os.environ.get('YKT_NO_CURL'):
+        return False
+    p = curl_path()
+    if not p:
+        return False
+    return Path(p).exists() or bool(shutil.which(p))
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """不跟随 3xx —— 对齐 curl 的默认行为（不带 -L 就不跟）。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _request_py(method: str, url: str, *, cookie: str = '', referer: str = '',
+                data: object | None = None, with_headers: bool = False,
+                timeout: int = 20, extra_headers: dict | None = None,
+                tag: str = '', form: dict | None = None,
+                files: dict | None = None, follow: bool = False) -> Resp:
+    """纯 Python 版 HTTP，等价于 curl 那条路径。
+
+    存在的原因：Android 上没有 curl 可执行文件，而整套业务逻辑都靠 request()。
+    这里保证同一套调用约定（headers / JSON / form / multipart / 不跟随跳转 /
+    Resp.headers 为原始头文本），上层代码一行都不用改。
+    """
+    started = time.perf_counter()
+    extra = {k: v for k, v in (extra_headers or {}).items() if k}
+    if APP_IDENTITY and is_ykt_url(url):
+        merged = dict(APP_HEADERS)
+        merged.update(extra)
+        if _app_uid and not any(k.lower() == 'x-uid' for k in merged):
+            merged['x-uid'] = _app_uid
+        extra = merged
+    if not any(k.lower() == 'user-agent' for k in extra):
+        extra['User-Agent'] = UA
+    if cookie:
+        extra['Cookie'] = cookie
+    if referer:
+        extra['Referer'] = referer
+
+    body: bytes | None = None
+    if data is not None:
+        body = json.dumps(data, ensure_ascii=False,
+                          separators=(',', ':')).encode('utf-8')
+        extra['Content-Type'] = 'application/json'
+    elif files:
+        boundary = '----HFUTone' + uuid.uuid4().hex
+        buf = bytearray()
+        for k, v in (form or {}).items():
+            buf += (f'--{boundary}\r\nContent-Disposition: form-data; '
+                    f'name="{k}"\r\n\r\n{v}\r\n').encode('utf-8')
+        for field, path in files.items():
+            p = Path(path)
+            raw = p.read_bytes()
+            buf += (f'--{boundary}\r\nContent-Disposition: form-data; '
+                    f'name="{field}"; filename="{p.name}"\r\n'
+                    f'Content-Type: application/octet-stream\r\n\r\n').encode('utf-8')
+            buf += raw + b'\r\n'
+        buf += f'--{boundary}--\r\n'.encode('utf-8')
+        body = bytes(buf)
+        extra['Content-Type'] = f'multipart/form-data; boundary={boundary}'
+    elif form is not None:
+        body = urllib.parse.urlencode(
+            {k: ('' if v is None else v) for k, v in form.items()}).encode('utf-8')
+        extra['Content-Type'] = 'application/x-www-form-urlencoded'
+
+    req = urllib.request.Request(url, data=body, method=method, headers=extra)
+    handlers = [urllib.request.HTTPSHandler(context=ssl.create_default_context())]
+    handlers.append(urllib.request.HTTPRedirectHandler() if follow else _NoRedirect())
+    opener = urllib.request.build_opener(*handlers)
+
+    def _ms() -> int:
+        return int((time.perf_counter() - started) * 1000)
+
+    def _hdr_text(code: int, reason: str, headers) -> str:
+        lines = [f'HTTP/1.1 {code} {reason or ""}'.rstrip()]
+        try:
+            for k, v in headers.items():
+                lines.append(f'{k}: {v}')
+        except (AttributeError, TypeError):
+            pass
+        return '\r\n'.join(lines) + '\r\n'
+
+    try:
+        resp = opener.open(req, timeout=timeout)
+        raw = resp.read() or b''
+        status = resp.status
+        enc = (resp.headers.get('Content-Encoding') or '').lower()
+        if enc == 'gzip':
+            try:
+                raw = gzip.decompress(raw)
+            except OSError:
+                pass
+        text = raw.decode('utf-8', 'replace')
+        heads = _hdr_text(status, resp.reason, resp.headers)
+        log(f'[HTTP-py] {method} {url}  {_ms()}ms  status={status}'
+            f'  len={len(text)}  tag={tag}  resp={head(text, 120)}')
+        return Resp(status, text, heads, 0, _ms())
+    except urllib.error.HTTPError as e:
+        try:
+            raw = e.read() or b''
+        except Exception:                       # noqa: BLE001
+            raw = b''
+        text = raw.decode('utf-8', 'replace')
+        heads = _hdr_text(e.code, e.reason, e.headers)
+        log(f'[HTTP-py] {method} {url}  {_ms()}ms  status={e.code}'
+            f'  len={len(text)}  tag={tag}  resp={head(text, 120)}')
+        return Resp(e.code, text, heads, 0, _ms())
+    except Exception as e:                      # noqa: BLE001  超时/证书/DNS
+        msg = str(e)
+        code = 28 if 'timed out' in msg.lower() else 0
+        log(f'[HTTP-py] {method} {url}  失败 {msg[:120]}  tag={tag}')
+        return Resp(code, '', '', code, _ms())
+
+
+def fetch_bytes(url: str, *, referer: str = '', cookie: str = '',
+                headers: dict | None = None, timeout: int = 30,
+                out_path: str | None = None) -> bytes | None:
+    """取二进制（图片/课件页）。有 curl 用 curl，没有就用 urllib。
+
+    存在的理由：课件页、学习通图片上传前的下载，都需要原始字节。走 request()
+    会把内容当文本 decode，二进制就被替换符污染了，所以单独一条路。
+    """
+    if not url:
+        return None
+    if replay_dir():
+        return None
+    extra = {k: v for k, v in (headers or {}).items() if k}
+    if not any(k.lower() == 'user-agent' for k in extra):
+        extra['User-Agent'] = UA
+    if cookie:
+        extra['Cookie'] = cookie
+    if referer:
+        extra['Referer'] = referer
+
+    if _use_curl():
+        args = [curl_path(), '-s', '--max-time', str(int(timeout))]
+        if out_path:
+            args += ['-o', out_path]
+        args += [url]
+        for k, v in extra.items():
+            args += ['-H', f'{k}: {(v or "")}']
+        args += ca_cert_arg()
+        try:
+            proc = subprocess.run(args, capture_output=True, timeout=timeout + 15,
+                                  creationflags=_NO_WINDOW)
+            if proc.returncode != 0:
+                return None
+            if out_path:
+                p = Path(out_path)
+                return p.read_bytes() if p.exists() and p.stat().st_size else None
+            return proc.stdout or None
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            log(f'[下载] 失败 {url} {exc}')
+            return None
+
+    req = urllib.request.Request(url, headers=extra)
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            data = resp.read() or b''
+        if out_path:
+            Path(out_path).write_bytes(data)
+        return data or None
+    except Exception as exc:                    # noqa: BLE001
+        log(f'[下载] 失败 {url} {exc}')
+        return None
+
+
 def request(method: str, url: str, *, cookie: str = '', referer: str = '',
             data: object | None = None, with_headers: bool = False,
             timeout: int = 20, extra_headers: dict | None = None,
@@ -340,6 +520,13 @@ def request(method: str, url: str, *, cookie: str = '', referer: str = '',
         r = _replay(url, with_headers)
         log(f'[回放] {method} {url}  status={r.status}  len={len(r.body)}')
         return r
+
+    # 没有 curl 可执行（Android）时走纯 Python，调用约定完全一致
+    if not _use_curl():
+        return _request_py(method, url, cookie=cookie, referer=referer,
+                           data=data, with_headers=with_headers,
+                           timeout=timeout, extra_headers=extra_headers,
+                           tag=tag, form=form, files=files, follow=follow)
 
     args = [curl_path(), '-s', '--max-time', str(int(timeout))]
     if follow:

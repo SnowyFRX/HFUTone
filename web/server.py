@@ -16,7 +16,15 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
+# 桌面版：把同级 src/ 加进导入路径。Android(Chaquopy) 里模块已由 apk 自带，
+# 而且这里的 __file__ 是虚拟 assets 路径 —— resolve() 在那种路径上会抛
+# FileNotFoundError，所以既不 resolve，也先确认目录真实存在。
+_src_dir = Path(__file__).parent.parent / 'src'
+try:
+    if _src_dir.is_dir():
+        sys.path.insert(0, str(_src_dir))
+except OSError:
+    pass
 from hfutlive import HfutLive, HfutLiveError, check_intranet, friendly_error  # noqa: E402
 import hfutplay                                                     # noqa: E402
 import wsserve                                                      # noqa: E402
@@ -57,6 +65,11 @@ if getattr(sys, 'frozen', False):                # PyInstaller 打包后
     HERE = Path(sys._MEIPASS) / 'web'
 else:
     HERE = Path(__file__).resolve().parent
+# Android 上网页资源打进了 apk 的 assets，启动时解到 filesDir/web，
+# 这个变量把服务指向那份解出来的目录（assets 里的文件不能用 open() 直接读）。
+_web_override = os.environ.get('HFUT_WEB_DIR')
+if _web_override:
+    HERE = Path(_web_override)
 REG_PATH = r'Software\HFUTLiveTool'
 try:
     from hfutlive import CONFIG_DIR as _CFG
@@ -1398,8 +1411,17 @@ class Handler(BaseHTTPRequestHandler):
         rel = path.lstrip('/') or 'index.html'
         if rel in ('', '/'):
             rel = 'index.html'
-        target = (HERE / rel).resolve()
-        if not str(target).startswith(str(HERE)) or not target.is_file():
+        # Android 上 /data/user/0 是指向 /data/data 的符号链接：resolve() 会把
+        # 目标规范化成 /data/data/...，而 HERE 还是 /data/user/0/...，用 startswith
+        # 比较就会把所有静态资源判成"越界"（整站 404）。两边都比 resolve 后的路径。
+        try:
+            base = HERE.resolve()
+            target = (base / rel).resolve()
+            inside = target.is_relative_to(base)
+        except (OSError, ValueError):
+            inside = False
+            target = HERE / rel
+        if not inside or not target.is_file():
             self._send(404, b'not found', 'text/plain; charset=utf-8')
             return
         ext = target.suffix.lower()

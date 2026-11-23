@@ -1,0 +1,63 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+
+def webOut = layout.buildDirectory.get().asFile
+
+android {
+    namespace 'com.hfutone.app'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.hfutone.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+        ndk {
+            // 雷电是 x86_64；真机是 arm64
+            abiFilters 'x86_64', 'arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            // 网页资源：构建期复制到 build/webassets/web，再作为 assets 打进 apk。
+            // 不能交给 Chaquopy 的 python srcDir —— apk 里的 assets 用 open() 读不了。
+            assets.srcDirs += [new File(webOut, 'webassets')]
+            // 业务层直接用桌面版 src/，一份源码两边共用
+            python.srcDirs = ['../../src', '../../web']
+        }
+    }
+}
+
+/** 把桌面版 web/ 复制成 assets/web/ */
+tasks.register('copyWebAssets', Copy) {
+    from rootProject.file('../web')
+    into new File(webOut, 'webassets/web')
+}
+
+tasks.named('preBuild') { dependsOn 'copyWebAssets' }
+
+chaquopy {
+    defaultConfig {
+        // 目标 Python 与 buildPython 必须同 minor 版本
+        version = '3.12'
+        buildPython 'D:/DSHSYBA/Python312/python.exe'
+    }
+}
+
+dependencies {
+}

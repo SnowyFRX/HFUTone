@@ -601,20 +601,7 @@ class Ykt:
             return None
         if core.replay_dir():
             return None
-        import subprocess
-        args = [core.curl_path(), '-s', '--max-time', '25', url,
-                '-H', f'User-Agent: {core.UA}']
-        if referer:
-            args += ['-H', f'Referer: {referer}']
-        args += core.ca_cert_arg()
-        try:
-            proc = subprocess.run(args, capture_output=True,
-                                  creationflags=core._NO_WINDOW, timeout=40)
-            if proc.returncode == 0 and proc.stdout:
-                return proc.stdout
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            log(f'[课件] 下载失败 {url} {exc}')
-        return None
+        return core.fetch_bytes(url, referer=referer, timeout=25)
 
     # -- 随堂题 -----------------------------------------------------------
     def questions(self, lesson_id: str, wait: float = 12.0) -> tuple[list[dict], str]:
