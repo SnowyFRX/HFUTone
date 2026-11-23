@@ -154,6 +154,31 @@ HTTP 服务和两条监控线程还在这个进程里跑着，关掉就等于停
 `守护服务：Python 服务就绪 http://127.0.0.1:8766/`（8765 还被上一个进程的 socket
 占着，正好验证了端口顺延那段），重新打开 App 直接接到 8766，界面与状态都正常。
 
+### 打 release 包
+
+```bash
+# 1) 首次：生成签名密钥（放 android/keystore/，已 gitignore）
+"$JAVA_HOME/bin/keytool" -genkeypair -v -keystore android/keystore/hfutone.jks \
+  -alias hfutone -keyalg RSA -keysize 2048 -validity 10000 \
+  -storepass <口令> -keypass <口令> -dname "CN=HFUTone, O=HFUTone, L=Hefei, C=CN"
+
+# 2) android/keystore.properties 填 storeFile / storePassword / keyAlias / keyPassword
+
+# 3) 构建（产物：android/app/build/outputs/apk/release/app-release.apk）
+gradle -p android assembleRelease
+```
+
+几件事：
+
+- `keystore/` 与 `keystore.properties` 都不入库：密钥进了 git，谁都能给这个包名
+  签一个「更新」把正版替换掉。反过来也要自己备份——换机器后签名不一致，只能卸载
+  重装，登录态与已签到记录一起没。
+- release 包 `debuggable=false`，`run-as` 用不了，adb 也读不到应用私有目录。
+  调试、导配置一律用 debug 包。
+- release 构建前那道 lint 关掉了（`checkReleaseBuilds false`）：它会去下载几十 MB
+  的 lint 工具链，断网/校园网下直接卡在无关的地方。要看 lint 手动跑 `gradle lint`。
+- debug 与 release 签名不同，二者不能互相覆盖安装。先在手机上装哪个就一直用哪个。
+
 在本机模拟器（720×1280 / Android 15）上验证过的：冷启动 1.4 秒出界面、雨课堂状态在
 2 秒内由「正在加载…」变成「黄尊鹏 · 暂无在播」、雨课堂/学习通切换、设置弹层（直播两组
 已隐藏）、HOME 键退出 25 秒后进程与 HTTP 服务仍在。

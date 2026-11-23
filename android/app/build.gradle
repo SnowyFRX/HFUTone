@@ -5,6 +5,14 @@ plugins {
 
 def webOut = layout.buildDirectory.get().asFile
 
+// release 签名：密钥与口令在 android/keystore.properties（不入库）。
+// 文件不存在时 release 包不签名（构建仍可跑，只是不能直接装）。
+def ksProps = new Properties()
+def ksFile = rootProject.file('keystore.properties')
+if (ksFile.exists()) {
+    ksFile.withInputStream { ksProps.load(it) }
+}
+
 android {
     namespace 'com.hfutone.app'
     compileSdk 36
@@ -21,10 +29,30 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            if (ksFile.exists()) {
+                storeFile rootProject.file(ksProps['storeFile'])
+                storePassword ksProps['storePassword']
+                keyAlias ksProps['keyAlias']
+                keyPassword ksProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig ksFile.exists() ? signingConfigs.release : null
         }
+    }
+
+    // release 构建前的那道 lint 会去下载 com.android.tools.lint（几十 MB），
+    // 这个工程没有 commit 的 lint baseline，断网/校园网下直接卡在解析依赖上。
+    // 真要看 lint 手动跑 ./gradlew lint。
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 
     compileOptions {
