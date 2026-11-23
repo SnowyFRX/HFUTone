@@ -1,213 +1,384 @@
 /* ============================================================================
-   mobile.css —— 手机 / 窄屏适配（Android App 用 WebView 打开同一套页面）
+   mobile.css —— 窄屏（Android WebView）专用布局
 
-   桌面版是「左主区 + 右 640px 侧栏」的横向 split，在 720px 宽的手机上会把
-   主区挤到只剩几十像素。这里只做覆盖，不改桌面任何规则：
-     1. split 改纵向堆叠
-     2. 侧栏展开时占满宽度，收起时彻底不占位
-     3. 头部按钮换行、底部按钮铺满
+   桌面版是「固定视口高度 + 左主区 + 右侧栏 640px」的横向 split，内部各自滚动。
+   手机只有 360–430 CSS px 宽，原样搬过去会出现三个必坏的地方：
+
+     1. .app 用 height:100% / .split 用 flex:1，主区被压成一条，卡片被裁；
+     2. 侧栏在 ≤1180px 是 absolute 浮层，窄屏上直接盖住主区；
+     3. 待开始课程是绝对定位的层叠卡，窄屏只能看到中间一角，还会漏到下面的卡片上。
+
+   所以这里不做「桌面 + 补丁」，而是把整页翻成单列文档流：
+     页面整体纵向滚动 → 主区（课表）在上一段 → 侧栏（雨课堂/学习通）在下一段。
+   Android 上直播画面用不了（需要 Media3 重写），整块连同底部播放条一起撤掉，
+   由 mobile.js 给 body 加 .is-android 来开关，桌面 UA 完全不受影响。
    ========================================================================== */
 
 @media (max-width: 820px) {
-  html, body { overflow-x: hidden; }
-
-  .app {
-    padding: 10px 10px 14px;
-    gap: 10px;
-    max-width: none;
+  /* ---------- 骨架：从「视口固定」改成「文档流滚动」 ---------- */
+  html,
+  body {
+    height: auto !important;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* ---------- 头部 ---------- */
-  .head { flex-direction: column; gap: 10px; }
-  .brand h1 { font-size: 22px; }
-  .brand .sub { font-size: 12px; }
+  body { margin: 0; padding: 0; }
+
+  /* 背景水墨画布是全屏 canvas，按窗口算尺寸，小屏上只会带来横向溢出 */
+  #ocean { display: none !important; }
+
+  .app {
+    height: auto !important;
+    min-height: 100vh;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 12px 12px calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+    gap: 12px !important;
+    box-sizing: border-box;
+  }
+
+  .app * { box-sizing: border-box; }
+
+  /* ---------- 页头 ---------- */
+  .head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .brand h1 { font-size: 24px; letter-spacing: -0.6px; }
+  .brand .sub { font-size: 12px; margin-top: 4px; }
 
   .head-actions {
     width: 100%;
     flex-wrap: wrap;
     gap: 6px;
   }
+
   .head-actions button {
-    flex: 1 1 46%;
-    min-height: 38px;
+    flex: 1 1 calc(50% - 3px);
+    min-height: 40px;
     justify-content: center;
     font-size: 13px;
+    padding: 0 10px;
   }
 
-  /* ---------- 主区 + 侧栏：纵向堆叠 ---------- */
-  .split { flex-direction: column; }
-  .split > .workspace { flex: 1 1 auto; min-width: 0; }
+  /* ---------- 状态行 ---------- */
+  .bar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .bar .status { font-size: 12px; line-height: 1.35; }
+  .bar .count { font-size: 11px; }
+
+  .notice { font-size: 12px; }
+
+  /* ---------- split：纵向堆叠，不再撑满视口 ---------- */
+  .split {
+    display: block !important;
+    flex: none !important;
+    min-height: 0 !important;
+    width: 100% !important;
+  }
+
+  .split > .workspace {
+    display: block;
+    flex: none !important;
+    min-height: 0 !important;
+    width: 100% !important;
+  }
+
+  /* ---------- 待开始课程：层叠卡 → 单张静态卡 ----------
+     桌面靠 --x/--y/--scale/--rotate 做立体层叠，窄屏上只会露出中间一角。
+     这里只显示当前这一张（JS 给的 .is-active），其余彻底不参与布局，
+     左右切换仍然走顶部那对箭头和下方圆点。 */
+  .deck-panel {
+    display: block !important;
+    flex: none !important;
+    min-height: 0 !important;
+    padding: 0;
+  }
+
+  .deck-head {
+    padding: 0 2px 8px;
+    gap: 8px;
+  }
+  .deck-heading { gap: 8px; }
+  .deck-heading h2 { font-size: 18px; }
+  .eyebrow { font-size: 9px; letter-spacing: 1.6px; }
+  .deck-counter { min-width: 44px; font-size: 10px; }
+
+  .deck-stage {
+    perspective: none !important;
+    overflow: visible !important;
+    min-height: 0 !important;
+    display: block !important;
+  }
+  .deck-stage::before { display: none !important; }
+
+  .course-card {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    transform: none !important;
+    opacity: 1 !important;
+    z-index: auto !important;
+    pointer-events: auto !important;
+    border-radius: 20px !important;
+    margin: 0 0 10px;
+  }
+
+  .course-card:not(.is-active) { display: none !important; }
+
+  .card-inner { padding: 18px 18px 16px !important; }
+  .card-title { font-size: 22px !important; }
+  .card-title-wrap { margin-top: 12px !important; }
+  .card-info {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px !important;
+    padding-top: 12px !important;
+  }
+  .card-meta + .card-meta { padding-left: 0 !important; }
+  .card-meta .card-value { font-size: 13px !important; }
+  .card-meta.time .card-value { font-size: 18px !important; }
+  .card-sub { font-size: 9px !important; }
+
+  .deck-foot { padding-top: 8px; }
+
+  /* ---------- 全部课程列表：手机上允许横向滑动 ---------- */
+  .all-courses { margin-top: 4px; }
+  .all-courses .panel { overflow-x: auto; }
+  .all-courses .thead,
+  .all-courses .row {
+    min-width: 520px;
+    font-size: 12px;
+  }
+
+  /* ---------- 侧栏：从浮层改成正常的一块内容 ---------- */
+  .side-grip { display: none !important; }
 
   .side,
   .side.is-open {
-    flex: 0 0 auto;
+    position: static !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
+    left: auto !important;
+    flex: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    opacity: 1 !important;
+    transform: none !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    background: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    transition: none !important;
+  }
+
+  /* 收起 = 整块不占位；展开由顶栏「在线课堂」控制 */
+  .side:not(.is-open) { display: none !important; }
+
+  .side::before { display: none !important; }
+
+  .side > .side-shell,
+  .side-shell {
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    transform: none !important;
+  }
+
+  .side-tabs { padding: 4px; }
+  .side-tabs button { min-height: 38px; font-size: 13px; }
+
+  /* 面板里不再内滚：整页滚动，内容多也不会被裁成半截 */
+  .side-panels {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  .side-panels > .ykt-panel {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 6px 14px 14px !important;
+  }
+
+  .ykt-list {
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* 标题行在 360px 宽的屏上一行放不下「标题 + 状态 + 学校 + 身份标」，
+     原来会把标题折成「长江雨课 / 堂」并压到下一行。改成纵向：标题一行，
+     状态/学校/身份另起一行。 */
+  .ykt-titlerow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .ykt-title h2 {
+    font-size: 20px !important;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .ykt-titlerow .bar {
     width: 100%;
-    max-width: 100%;
-    padding-left: 0;
-    transform: none;
-  }
-  .side:not(.is-open) { display: none; }
-
-  /* 分隔条在手机上没意义，拖不了 */
-  .side-grip { display: none; }
-
-  /* ---------- 侧栏内部：不要固定高度，让内容自己撑 ---------- */
-  .side-shell,
-  .side-panels,
-  .ykt-panel {
-    max-height: none;
-    height: auto;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 6px;
   }
 
-  .ykt-list { max-height: 46vh; }
+  .ykt-titlerow .bar .status {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-  /* ---------- 直播画面 ---------- */
-  .live-card {
+  .ykt-actions {
     width: 100%;
-    max-width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
   }
-  .live-stage { min-height: 180px; }
+  .ykt-actions button {
+    flex: 1 1 calc(50% - 4px);
+    min-height: 40px;
+    justify-content: center;
+  }
 
-  /* ---------- 底部 ---------- */
+  /* 课程行在窄屏改成两行：名字/元信息占一行，按钮换行到下面 */
+  .ykt-row {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 12px 0 !important;
+  }
+  .ykt-row-main { flex: 1 1 100% !important; min-width: 0 !important; }
+  .ykt-row-name {
+    font-size: 15px !important;
+    white-space: normal !important;
+  }
+  .ykt-row-btns {
+    flex: 1 1 100% !important;
+    flex-wrap: wrap;
+    gap: 6px !important;
+  }
+  .ykt-row-btns button {
+    flex: 1 1 auto;
+    min-height: 36px;
+    font-size: 12px;
+  }
+
+  .ykt-foot {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 10px;
+  }
+  .ykt-foot button {
+    flex: 1 1 calc(50% - 4px);
+    min-height: 42px;
+    justify-content: center;
+  }
+
+  /* ---------- 底部播放条 ---------- */
   .foot {
     flex-wrap: wrap;
     gap: 8px;
     padding: 8px;
   }
-  .foot .hint { width: 100%; margin: 0; }
+  .foot .hint { width: 100%; margin: 0 0 4px; font-size: 11px; }
   .foot button,
   .foot .play {
     flex: 1 1 100%;
     min-height: 42px;
   }
+
+  /* ---------- 弹层：贴边、满宽，别在 360px 上留 40px 纯空白 ---------- */
+  .sheet,
+  .pres-sheet {
+    width: calc(100% - 20px) !important;
+    max-width: none !important;
+    max-height: calc(100vh - 40px);
+    border-radius: 18px;
+  }
+  .pres-stage { padding: 10px; }
 }
 
-/* 极窄屏再收一档 */
-@media (max-width: 420px) {
+/* 极窄屏（老机型 360px）再收一档 */
+@media (max-width: 400px) {
+  .brand h1 { font-size: 21px; }
   .head-actions button { flex: 1 1 100%; }
-  .foot button, .foot .play { flex: 1 1 100%; }
-  .brand h1 { font-size: 20px; }
-}
-/* ---------------------------------------------------------------- 溢出收敛
-   桌面版侧栏宽度是写死的 --side-w(640px)，卡片宽度都用 calc(--side-w - s4) 算。
-   手机上必须把这些"跟着桌面色板走"的宽度全部收回到 100%，否则整页比屏幕宽，
-   浏览器横向滚动后左侧内容就被推到视口外（表现为标题/面板左边被裁）。 */
-@media (max-width: 820px) {
-  html, body { width: 100%; overflow-x: hidden; }
-
-  .app,
-  .split,
-  .split > .workspace,
-  .side,
-  .side-shell,
-  .side-panels,
-  .side-panels > .ykt-panel,
-  .live-card,
-  .deck-panel,
-  .foot {
-    width: 100% !important;
-    max-width: 100% !important;
-    min-width: 0 !important;
-  }
-
-  .side { overflow: visible; }
-  .side-shell { height: auto !important; }
-  .side-panels > .ykt-panel {
-    padding-left: var(--s3, 12px) !important;
-    padding-right: var(--s3, 12px) !important;
-  }
+  .card-info { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ykt-actions button { flex: 1 1 100%; }
 }
 
-/* ---------------------------------------------------------------- 直播画布
-   <canvas id="liveCanvas" width="1280" height="720"> 的 width 属性是绘制缓冲
-   尺寸，但 CSS 里没给它设布局宽度，于是它按 1280px 参与布局 —— 720 宽的手机
-   被它撑爆，横向滚动后左边内容就被裁掉（标题、面板左侧都缺一截）。
-   桌面窗口比 1280 宽，所以这个坑在桌面上从不暴露。 */
-@media (max-width: 820px) {
-  .live-stage { overflow: hidden; }
-
-  .live-stage canvas,
-  #liveCanvas {
-    display: block;
-    width: 100% !important;
-    max-width: 100% !important;
-    height: auto !important;
-  }
+/* ============================================================================
+   Android 专用：直播画面在本机不可用
+   桌面版是 ffmpeg 抽帧 + mpv 独立窗口，Android 上要 Media3/ExoPlayer 重写。
+   与其放一个必然失败的面板，不如整块撤掉，把版面全给雨课堂/学习通。
+   由 mobile.js 在 UA 含 Android 时给 <body> 加 .is-android。
+   ========================================================================== */
+body.is-android .live-card,
+body.is-android .foot {
+  display: none !important;
 }
 
-/* ---------------------------------------------------------------- 左偏移清零
-   面板内容左侧持续被裁十几像素，说明有祖先带着 padding/margin/transform 把
-   内容推出了容器左边界。移动端不需要这些留白，统一清零最省事。 */
-@media (max-width: 820px) {
-  .app,
-  .split,
-  .side,
-  .side-shell,
-  .side-panels,
-  .side-panels > .ykt-panel,
-  .split > .workspace,
-  .foot,
-  .head {
-    margin-left: 0 !important;
-    padding-left: 0 !important;
-    transform: none !important;
-    left: auto !important;
-  }
+/* 手机上没有物理键盘，Enter/Ctrl+C 那些提示没有意义 */
+body.is-android #playHint { display: none !important; }
 
-  .app { padding-right: 10px !important; }
-
-  .side-panels > .ykt-panel {
-    padding-right: 12px !important;
-  }
-
-  /* 面板内部标题行也别再缩进 */
-  .ykt-head, .ykt-titlerow, .ykt-actions, .ykt-list, .ykt-foot {
-    padding-left: 12px !important;
-    padding-right: 12px !important;
-    margin-left: 0 !important;
-  }
+/* 直播课表（主区）也一起撤掉：
+   它要校园网 + 学号密码才拉得动，在手机流量/校外必然停在「加载超时」，
+   而首屏摆一条红色失败提示，会让人以为整个 App 坏了。
+   课表本身对签到没有作用——签到在雨课堂/学习通那两栏里。
+   顶栏的「刷新」是刷新直播课表，同样没有意义，一并隐藏。 */
+body.is-android .workspace,
+body.is-android .notice,
+body.is-android #btnRefresh {
+  display: none !important;
 }
 
-/* 背景装饰画布：它是全屏 canvas，尺寸跟着窗口算，手机上只会带来横向溢出，
-   而且水墨颗粒在 720px 宽的小屏上本来也看不清。直接撤掉。 */
-@media (max-width: 820px) {
-  #ocean { display: none !important; }
-  body { margin: 0; padding: 0; }
-  .app { padding: 10px 10px 14px !important; }
+/* 只藏顶部那条「正在连接…」状态行；
+   .ykt-titlerow 里同名 .bar 是雨课堂的状态组，不能跟着一起没了 */
+body.is-android .app > .bar {
+  display: none !important;
 }
 
-/* 直播卡片内部还有一层左内边距没清，标题首字（LIVE BOARD / 直播画面）被裁在
-   容器左边界外。这里按同样方式清零。 */
-@media (max-width: 820px) {
-  .live-card,
-  .live-head,
-  .live-titles,
-  .live-stage,
-  .live-foot,
-  .live-empty {
-    padding-left: 0 !important;
-    margin-left: 0 !important;
-  }
-  .live-card { padding: 10px !important; }
+/* 侧栏在 Android 上常驻：没有「展开/收起」这个动作，
+   .is-open 只是 ykt.js 内部的状态，CSS 统一按展开渲染。 */
+body.is-android .side,
+body.is-android .side:not(.is-open) {
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  pointer-events: auto !important;
 }
 
-/* 盒模型：桌面版没有全局 border-box，上面那些 width:100% + padding 的组合会
-   把内容顶出容器（表现为标题首字被裁）。移动端统一成 border-box。 */
-@media (max-width: 820px) {
-  .app,
-  .app * {
-    box-sizing: border-box;
-  }
+/* 顶栏按钮在 Android 上只剩三个，摊成一排更好按 */
+body.is-android .head-actions button {
+  flex: 1 1 30%;
 }
 
-/* 直播卡片基础样式里带着入场动画的 transform: translateX(8px)，桌面靠动画
-   结束时归零；移动端如果没有动画触发，这个偏移会常驻，正好把标题首字推出
-   容器左边界（LIVE BOARD 只剩 VE BOARD）。 */
-@media (max-width: 820px) {
-  .live-card,
-  .live-card[data-enter] {
-    transform: none !important;
-    opacity: 1 !important;
-    margin-left: 0 !important;
-  }
+/* 设置里「自动推流」「拉取的流」两组只对桌面播放链路有意义，
+   Android 上整块撤掉，剩下的就是签到相关的设置。 */
+body.is-android .set-live-only {
+  display: none !important;
 }

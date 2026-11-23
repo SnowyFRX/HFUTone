@@ -2,6 +2,8 @@ package com.hfutone.app;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -39,8 +41,17 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // WebView 默认白底：Python 起服务的那几百毫秒会先闪一屏纯白。
+        // 设成页面自己的米色，冷启动看起来是一体的。
+        web.setBackgroundColor(Color.parseColor("#F7F4ED"));
         web.setWebViewClient(new WebViewClient());
         setContentView(web);
+
+        // debug 包才开 WebView 调试：桌面 chrome://inspect 能直接看到页面控制台，
+        // 前端布局/接口问题不用每次 adb logcat 猜。release 包保持关闭。
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
 
         // 前台服务：保证退到后台后 Python 服务与自动签到继续活着
         Intent svc = new Intent(this, KeepAliveService.class);

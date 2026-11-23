@@ -36,7 +36,10 @@ HFUTone/
 │   ├── app.js / app.css  直播课堂界面（原样保留）
 │   ├── ykt.js / ykt.css  雨课堂界面 + 直播画面卡片 + 设置弹层
 │   ├── cx.js             学习通签到界面（复用 ykt.css 的行与按钮骨架）
-│   └── ppt.js            设置项与画面：WebSocket 收帧、canvas 绘制、点击放大
+│   ├── ppt.js            设置项与画面：WebSocket 收帧、canvas 绘制、点击放大
+│   ├── mobile.css        窄屏单列布局（Android WebView 用，桌面规则不动）
+│   └── mobile.js         Android 行为适配：撤掉直播块、首屏拉一次课程
+├── android/              独立 Android App（原生壳 + Chaquopy 内嵌 Python）
 ├── vendor/curl/          内置 LibreSSL 版 curl（.gz，首次运行解压到 .config/bin）
 ├── vendor/ffmpeg/        ffmpeg 7.1（PPT 抽帧用；网页里没有 H.264 解码器）
 ├── fixtures/             离线回放夹具（YKT_REPLAY 指向它，不联网跑回归）
@@ -72,6 +75,68 @@ python src/yktapi.py
 ```
 
 ---
+
+## Android
+
+`android/` 是与桌面版共用业务层的独立 App：原生 Java 外壳 + Chaquopy 内嵌 Python，
+WebView 打开 `127.0.0.1` 上的同一套 `web/` 页面。业务代码只有一份（`src/`、`web/`）。
+
+```
+android/
+├── app/src/main/java/com/hfutone/app/
+│   ├── App.java              PyApplication，初始化 Python 运行时
+│   ├── MainActivity.java     解压 assets/web → 调 android_boot.boot() → WebView 加载本地端口
+│   └── KeepAliveService.java 常驻通知的前台服务（dataSync）
+└── app/build.gradle          Chaquopy 3.12、ABI x86_64/arm64、网页资源构建期复制进 assets
+```
+
+构建（本机用 Android Studio 自带的 JDK + gradle 9.6）：
+
+```bash
+export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
+export ANDROID_HOME="C:/Users/<你>/AppData/Local/Android/Sdk"
+gradle -p android assembleDebug
+adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+# 产物：android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+`local.properties` 不要写成中文路径 —— Java properties 按 ISO-8859-1 读，用户名带中文
+会直接找不到 SDK。用 `ANDROID_HOME` 环境变量最省事。
+
+三个只在 Android 侧存在的约束：
+
+1. **配置目录**：apk 里的 assets 与源码树都是只读的。`android_boot.py` 在 `import server`
+   之前把 `YKT_CONFIG_DIR` 指到 `files/config`、`HFUT_WEB_DIR` 指到解压出来的 `files/web`，
+   顺序不能动 —— `server` 导入时就把这两个路径定死了。
+2. **没有 curl**：`YKT_NO_CURL=1` 强制走纯 Python 传输层。
+3. **端口会顺延**：force-stop 不走 `onDestroy`，旧监听 socket 可能还没释放，而
+   `LocalServer` 又刻意不允许复用地址。所以 boot 从 8765 往后找第一个能绑的端口，
+   把实际端口返回给原生侧 —— 原生侧不能假设端口就是 8765。
+
+### 界面：窄屏是单列，不是「桌面缩小版」
+
+`web/mobile.css` 在 `max-width: 820px` 下把整页翻成文档流：整页纵向滚动、主区在上、
+雨课堂/学习通在下、层叠课程卡只渲染当前一张、面板不再内滚。桌面规则一条不改。
+
+`web/mobile.js` 只在 UA 含 Android 时给 `<body>` 加 `.is-android`，做三件事：
+
+- **首屏主动拉一次课程**：桌面是「侧栏展开时才拉」，手机上根本没有展开这个动作，
+  不拉就会永远停在「正在加载…」。做法是先直连 `/api/ykt/refresh` 把后端的 `loaded`
+  置真，再等首轮 pull 回来后调前端 `refresh()` 重绘（只调前端不行：那一刻
+  `state.loggedIn` 还是 false，会让 refresh 退化成只 pull 不拉课）。
+- **「在线课堂」按钮改成「滚到面板 + 刷新」**：面板在 Android 上常驻，开合没有意义，
+  未签到红点仍然挂在按钮上。
+- **撤掉直播课表 / 直播画面 / 底部播放条**：直播画面要 Media3/ExoPlayer 重写（桌面是
+  ffmpeg 抽帧 + mpv 外部进程）；课表要校园网 + 学号密码，手机上首屏摆一条「加载超时」
+  的红字只会让人以为整个 App 坏了。签到走的是雨课堂/学习通，跟这张课表无关。
+  设置弹层里「自动推流」「拉取的流」两组同理，一起隐藏。
+
+`KeepAliveService` 挂常驻通知把进程钉在前台：签到窗口只有开课那几分钟，用户那时多半
+在别的应用里等验证码，退到后台被回收就全停了。
+
+在本机模拟器（720×1280 / Android 15）上验证过的：冷启动 1.4 秒出界面、雨课堂状态在
+2 秒内由「正在加载…」变成「黄尊鹏 · 暂无在播」、雨课堂/学习通切换、设置弹层（直播两组
+已隐藏）、HOME 键退出 25 秒后进程与 HTTP 服务仍在。
 
 ## 雨课堂这一栏怎么用
 

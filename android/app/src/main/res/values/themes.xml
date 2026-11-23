@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- 状态栏/导航栏取页面自己的米色 #F7F4ED：
+         WebView 是满屏绘制的，系统栏保持浅色才不会在顶部切出一条深色带。
+         windowLightStatusBar 让 6.0+ 用深色图标，和浅色底配。 -->
+    <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F7F4ED</item>
+        <item name="android:statusBarColor">#F7F4ED</item>
+        <item name="android:navigationBarColor">#F7F4ED</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>
