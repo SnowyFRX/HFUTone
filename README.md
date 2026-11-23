@@ -131,8 +131,28 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
   的红字只会让人以为整个 App 坏了。签到走的是雨课堂/学习通，跟这张课表无关。
   设置弹层里「自动推流」「拉取的流」两组同理，一起隐藏。
 
+### 保活：为什么是 specialUse，为什么服务里还要再 boot 一次
+
 `KeepAliveService` 挂常驻通知把进程钉在前台：签到窗口只有开课那几分钟，用户那时多半
 在别的应用里等验证码，退到后台被回收就全停了。
+
+两个坑：
+
+1. **前台服务类型不能用 dataSync。** Android 14 起 dataSync 类型在 24 小时内累计只能
+   前台跑 6 小时，超时系统直接 `onTimeout` 停服务——正好覆盖掉下午那几节课。改成
+   `specialUse`（声明 `PROPERTY_SPECIAL_USE_FGS_SUBTYPE=campus_signin_guard`），没有
+   这个时长限制。API 34 起 `startForeground` 要用三参版本且类型与 manifest 一致。
+2. **服务单独重启时没有 Activity。** 进程被系统回收后 `START_STICKY` 会把服务拉起来，
+   但界面不会出现，Python 的 HTTP 服务也没起——守护等于断了。所以解压 assets 与
+   `android_boot.boot()` 抽成了 `Boot.ensure()`，MainActivity 和 KeepAliveService
+   都走它，服务侧在后台线程里补一次。
+
+`MainActivity.onDestroy` 刻意不调 `android_boot.shutdown()`：Activity 退出只是界面没了，
+HTTP 服务和两条监控线程还在这个进程里跑着，关掉就等于停了守护。
+
+实测：HOME 键退出后 `kill -9` 掉进程，系统 1 秒内重启服务，日志出现
+`守护服务：Python 服务就绪 http://127.0.0.1:8766/`（8765 还被上一个进程的 socket
+占着，正好验证了端口顺延那段），重新打开 App 直接接到 8766，界面与状态都正常。
 
 在本机模拟器（720×1280 / Android 15）上验证过的：冷启动 1.4 秒出界面、雨课堂状态在
 2 秒内由「正在加载…」变成「黄尊鹏 · 暂无在播」、雨课堂/学习通切换、设置弹层（直播两组

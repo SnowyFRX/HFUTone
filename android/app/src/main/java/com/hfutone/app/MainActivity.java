@@ -11,25 +11,19 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import com.chaquo.python.Python;
-
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-
 /**
  * 原生外壳。
  *
  * 职责只有三件：把 apk 里 assets/web 解压到应用私有目录、拉起内嵌 Python 跑桌面版
  * 那套 HTTP 服务、用 WebView 打开本地地址。业务逻辑与界面全部复用桌面版源码，
  * 这样两边功能始终一致，也避免把 5000 行 Python 重写成 Java。
+ *
+ * 解压 + 起服务这一步抽在 {@link Boot} 里：KeepAliveService 在进程被回收后
+ * 单独重启时也要走同一套逻辑，否则界面不出现、HTTP 服务也没起，签到守护就是断的。
  */
 public class MainActivity extends Activity {
     private static final String TAG = "HFUTone";
     private WebView web;
-    private int port = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -61,37 +55,12 @@ public class MainActivity extends Activity {
             startService(svc);
         }
 
-        String filesDirTmp;
-        try {
-            // 用规范路径：/data/user/0 是 /data/data 的符号链接，传规范路径可以
-            // 让 Python 侧拼出来的目录和 resolve() 的结果一致
-            filesDirTmp = getFilesDir().getCanonicalPath();
-        } catch (IOException e) {
-            filesDirTmp = getFilesDir().getAbsolutePath();
-        }
-        final String filesDir = filesDirTmp;
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    File base = new File(filesDir);
-                    File webDir = new File(base, "web");
-                    File configDir = new File(base, "config");
-                    if (!configDir.exists()) {
-                        //noinspection ResultOfMethodCallIgnored
-                        configDir.mkdirs();
-                    }
-                    long t0 = System.currentTimeMillis();
-                    copyAssetDir("web", webDir);
-                    Log.i(TAG, "assets/web 解压完成 " + (System.currentTimeMillis() - t0) + "ms -> " + webDir);
-
-                    int p = Python.getInstance()
-                            .getModule("android_boot")
-                            .callAttr("boot", configDir.getAbsolutePath(), webDir.getAbsolutePath())
-                            .toJava(Integer.class);
-                    port = p;
-                    final String url = "http://127.0.0.1:" + p + "/";
-                    Log.i(TAG, "python 服务就绪 " + url);
+                    Boot.ensure(MainActivity.this);
+                    final String url = Boot.url();
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -115,49 +84,6 @@ public class MainActivity extends Activity {
         }, "hfutone-boot").start();
     }
 
-    /** 把 assets 下的一个目录整棵复制出来；assets 里的文件不能用 open() 读，必须先落地。 */
-    private void copyAssetDir(String assetPath, File dest) throws IOException {
-        String[] items = getAssets().list(assetPath);
-        if (items == null || items.length == 0) {
-            InputStream in = null;
-            try {
-                in = getAssets().open(assetPath);
-                File parent = dest.getParentFile();
-                if (parent != null && !parent.exists()) {
-                    //noinspection ResultOfMethodCallIgnored
-                    parent.mkdirs();
-                }
-                OutputStream out = new FileOutputStream(dest);
-                try {
-                    byte[] buf = new byte[16384];
-                    int n;
-                    while ((n = in.read(buf)) > 0) {
-                        out.write(buf, 0, n);
-                    }
-                } finally {
-                    out.close();
-                }
-            } catch (IOException e) {
-                // 空目录：assets 里建立不了空目录，这里当目录处理
-                //noinspection ResultOfMethodCallIgnored
-                dest.mkdirs();
-            } finally {
-                if (in != null) {
-                    try {
-                        in.close();
-                    } catch (IOException ignored) {
-                    }
-                }
-            }
-            return;
-        }
-        //noinspection ResultOfMethodCallIgnored
-        dest.mkdirs();
-        for (String name : items) {
-            copyAssetDir(assetPath + "/" + name, new File(dest, name));
-        }
-    }
-
     @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) {
@@ -169,12 +95,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        try {
-            if (port != 0) {
-                Python.getInstance().getModule("android_boot").callAttr("shutdown");
-            }
-        } catch (Throwable ignored) {
-        }
+        // 刻意不 shutdown Python：Activity 退出只是界面没了，签到守护还要继续跑
+        // （KeepAliveService 常驻前台，HTTP 服务与两条监控线程都在这个进程里）。
+        // 真要停，只能由用户划掉最近任务或系统回收进程。
         super.onDestroy();
     }
 }
