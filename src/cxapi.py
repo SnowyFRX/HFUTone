@@ -453,6 +453,13 @@ class Cx:
     def activities(self, course_id: str, class_id: str, cpi: str) -> list[dict]:
         """活动列表。两路接口合并：App 那份带 otherId（签到类型），
         Web 那份带 nameFour（活动描述），缺一边都判不准签到类型。
+
+        只返回「进行中且未签」的签到。两路的 activeList 都混着已结束的历史
+        （web 路 showNotStartedActive=0 只过滤未开始的），旧逻辑全量透传导致
+        面板堆一堆旧签到。过滤规则：
+          1. 窗口判进行中：startTime <= now <= endTime（endTime 缺失时 now >= start）
+          2. attend_info 判未签：status==1 的（已签/代签/请假/缺勤）直接丢
+        代价是每门课多打一次 attend_info 预检，但只打窗口内的活动，量很小。
         """
         join_time = self.join_class_time(course_id, class_id, cpi)
 
@@ -471,11 +478,6 @@ class Cx:
 
         d1 = self._json(r1)
         d2 = self._json(r2)
-        # 两路都是「进行中 + 近期历史」的混合列表。
-        # App 路（taskactivelist）的 status：1=进行中，2=已结束。
-        # Web 路（activelist）的 status 实测也是 1/2 同义——它把最近结束的历史
-        # 也带回来，不能当成"已签"用；新发的活动往往 App 路还没同步、
-        # 只在 Web 路出现，所以两路都要当主数据源，按 id 合并去重。
         now = time.time() * 1000
         merged: dict[str, dict] = {}
         for a in ((d1.get('activeList') or []) + ((d2.get('data') or {}).get('activeList') or [])):
@@ -487,42 +489,50 @@ class Cx:
             t = _int(a.get('activeType'), 0)
             if t not in (2, 74, 54):
                 continue
-            st = _int(a.get('status'), 0)
             start = _int(a.get('startTime'), 0)
             end = _int(a.get('endTime'), 0)
-            in_window = (st == 1) or (start <= now <= end) if end else (st == 1 or start <= now)
+            # 窗口判进行中。endTime 缺失的（少见）只看 now >= start。
+            in_window = bool(start) and (start <= now and (not end or now <= end))
+            if not in_window:
+                continue
             row = merged.get(aid)
             if row is None:
                 merged[aid] = {
                     'activeId': aid,
                     'type': t,
-                    'name': str(a.get('nameOne') or ''),
+                    'name': str(a.get('nameOne') or a.get('nameTwo') or ''),
                     'desc': str(a.get('nameTwo') or a.get('nameFour') or ''),
                     'startTime': start,
                     'endTime': end,
                     'url': str(a.get('url') or ''),
                     'attendNum': _int(a.get('attendNum')),
-                    'status': in_window,
+                    'status': True,
                     'signType': None,
-                    '_rawStatus': st,
                 }
             else:
-                # 后到的那份补字段；任一路判进行中就算进行中
-                row['status'] = row['status'] or in_window
                 if not row['name']:
-                    row['name'] = str(a.get('nameOne') or '')
+                    row['name'] = str(a.get('nameOne') or a.get('nameTwo') or '')
                 if not row['desc']:
                     row['desc'] = str(a.get('nameTwo') or a.get('nameFour') or '')
                 if not row['endTime']:
                     row['endTime'] = end
-                # otherId 判签到类型（0 普通/2 二维码/3 手势/4 位置/5 签到码）
-                other = a.get('otherId')
-                if other is not None and t in (2, 74):
-                    row['signType'] = _sign_type_from_index(_int(other)) or row['signType']
+            # otherId 判签到类型（0 普通/2 二维码/3 手势/4 位置/5 签到码）
+            other = a.get('otherId')
+            if other is not None and t in (2, 74):
+                st = _sign_type_from_index(_int(other))
+                if st and (not merged[aid]['signType'] or st == 'location'):
+                    merged[aid]['signType'] = st
 
+        # 预检过滤：窗口内但已签的（status==1 已签/代签/请假/缺勤）丢。
         out = []
         for row in merged.values():
-            row.pop('_rawStatus', None)
+            attend = {}
+            try:
+                attend = self.attend_info(row['activeId'])
+            except Exception:                                 # noqa: BLE001
+                pass
+            if _int(attend.get('status'), 0) == 1:
+                continue
             out.append(row)
         return out
 
