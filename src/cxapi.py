@@ -471,33 +471,58 @@ class Cx:
 
         d1 = self._json(r1)
         d2 = self._json(r2)
-        web_list = ((d2.get('data') or {}).get('activeList') or [])
-        web_map = {str(a.get('id')): a for a in web_list if isinstance(a, dict)}
-
-        out = []
-        for a in (d1.get('activeList') or []):
+        # 两路都是「进行中 + 近期历史」的混合列表。
+        # App 路（taskactivelist）的 status：1=进行中，2=已结束。
+        # Web 路（activelist）的 status 实测也是 1/2 同义——它把最近结束的历史
+        # 也带回来，不能当成"已签"用；新发的活动往往 App 路还没同步、
+        # 只在 Web 路出现，所以两路都要当主数据源，按 id 合并去重。
+        now = time.time() * 1000
+        merged: dict[str, dict] = {}
+        for a in ((d1.get('activeList') or []) + ((d2.get('data') or {}).get('activeList') or [])):
             if not isinstance(a, dict):
                 continue
             aid = str(a.get('id') or '')
-            row = {
-                'activeId': aid,
-                'type': _int(a.get('activeType')),
-                'name': str(a.get('nameOne') or ''),
-                'desc': str(a.get('nameTwo') or ''),
-                'startTime': _int(a.get('startTime')),
-                'url': str(a.get('url') or ''),
-                'attendNum': _int(a.get('attendNum')),
-                'status': _int(a.get('status')) == 1,
-                'signType': None,
-            }
-            web = web_map.get(aid)
-            if web:
-                if row['status'] and not row['desc']:
-                    row['desc'] = str(web.get('nameFour') or '')
-                if row['type'] in (2, 74):
-                    other = web.get('otherId')
-                    if other is not None:
-                        row['signType'] = _sign_type_from_index(_int(other))
+            if not aid:
+                continue
+            t = _int(a.get('activeType'), 0)
+            if t not in (2, 74, 54):
+                continue
+            st = _int(a.get('status'), 0)
+            start = _int(a.get('startTime'), 0)
+            end = _int(a.get('endTime'), 0)
+            in_window = (st == 1) or (start <= now <= end) if end else (st == 1 or start <= now)
+            row = merged.get(aid)
+            if row is None:
+                merged[aid] = {
+                    'activeId': aid,
+                    'type': t,
+                    'name': str(a.get('nameOne') or ''),
+                    'desc': str(a.get('nameTwo') or a.get('nameFour') or ''),
+                    'startTime': start,
+                    'endTime': end,
+                    'url': str(a.get('url') or ''),
+                    'attendNum': _int(a.get('attendNum')),
+                    'status': in_window,
+                    'signType': None,
+                    '_rawStatus': st,
+                }
+            else:
+                # 后到的那份补字段；任一路判进行中就算进行中
+                row['status'] = row['status'] or in_window
+                if not row['name']:
+                    row['name'] = str(a.get('nameOne') or '')
+                if not row['desc']:
+                    row['desc'] = str(a.get('nameTwo') or a.get('nameFour') or '')
+                if not row['endTime']:
+                    row['endTime'] = end
+                # otherId 判签到类型（0 普通/2 二维码/3 手势/4 位置/5 签到码）
+                other = a.get('otherId')
+                if other is not None and t in (2, 74):
+                    row['signType'] = _sign_type_from_index(_int(other)) or row['signType']
+
+        out = []
+        for row in merged.values():
+            row.pop('_rawStatus', None)
             out.append(row)
         return out
 
