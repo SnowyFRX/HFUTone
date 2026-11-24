@@ -34,3 +34,7 @@ last_backclazz.json
 # Android 签名（不入库：密钥泄露可以把别人的正版替换掉）
 android/keystore/
 android/keystore.properties
+
+# 发布产物（走 GitHub Release 附件，不进仓库）
+HFUTone-*.zip
+HFUTone-*.apk
