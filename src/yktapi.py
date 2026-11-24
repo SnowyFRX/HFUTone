@@ -265,9 +265,15 @@ class Ykt:
             room = core.js(item, 'classroomName')
             name = core.js(item, 'name', 'lesson_name') or \
                 (f'{course} · {room}' if room else course)
-            # signinStatus 是服务器眼中的"我签没签"，本地标记只当补充：
-            # 换了机器、清过配置，本地全空，但服务器其实早签过了。
-            signed = _truthy(core.js(item, 'signinStatus', 'signin_status'))
+            # signinStatus 在长江雨课堂的 on-lesson 里**不存在**（实测
+            # 2026-11-24，课堂进行中和已结束都一样，item 只有 classroomId/
+            # classroomName/courseId/courseName/lessonId/role/openTeacher/
+            # teacherAvatar/clone）。这里把常见变体都列出来，是为了将来
+            # 服务端真加了字段能自动生效；现在恒为 False，签到判据见
+            # signin_full 里的 rollcall 活动数分支。
+            signed = _truthy(core.js(item, 'signinStatus', 'signin_status',
+                                      'signInStatus', 'attendanceStatus',
+                                      'checked', 'isSignin'))
             rows.append({
                 'lessonId': str(lid),
                 'name': str(name),
@@ -492,8 +498,17 @@ class Ykt:
                 return _ok('already', f'服务器提示已签到（{msg}）')
             if signed or self._signed_on_server(lesson_id):
                 return _ok('already', '服务器已记录这堂课的签到')
+            # on-lesson 的课堂对象**没有 signinStatus 字段**（实测
+            # 2026-11-24：item 只有 classroomId/classroomName/courseId/
+            # courseName/lessonId/role/openTeacher/teacherAvatar/clone），
+            # 所以上面的 _signed_on_server 永远拿不到东西。真正能问的是
+            # rollcall：老师发起签到后会有一条活动记录；此时 App 身份
+            # 进班返回 code 0 就等于签到完成（这正是工小湖免扫那条路）。
+            # 反过来活动数为 0 说明老师还没发起签到，那才叫"已进班待签到"。
+            if n_act > 0:
+                return _ok('checked', f'已进班且老师已发起签到（活动 {n_act} 条）')
             result.update(ok=True, status='joined',
-                          detail='进班成功，但考勤里还没有签到记录（老师可能还没发起签到）')
+                          detail='进班成功，老师还没发起签到')
             return result
         if _already(msg):
             return _ok('already', f'服务器提示已签到（{msg}）')

@@ -1087,16 +1087,27 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/ykt/img':
-            # 二维码图片是七牛上的外链，走本地代理避开前端跨域/防盗链
+            # 课件页/二维码图片是七牛上的外链，走本地代理避开前端跨域/防盗链
             url = one('u')
             if not url:
                 self._send(400, b'no url', 'text/plain; charset=utf-8')
                 return
             data = YKT.ykt.download(url, referer=yktcore.SERVER + '/')
             if not data:
+                yktcore.log(f'[课件] 下载失败 {url[:120]}')
                 self._send(404, b'download failed', 'text/plain; charset=utf-8')
                 return
-            self._send(200, data, 'image/png')
+            # 按魔数给类型：七牛上课件页基本是 jpeg，早先写死 image/png
+            # 虽然浏览器多半能认出，但严格模式/懒加载下会当成坏图。
+            if data[:3] == b'\xff\xd8\xff':
+                ctype = 'image/jpeg'
+            elif data[:8] == b'\x89PNG\r\n\x1a\n':
+                ctype = 'image/png'
+            elif data[:4] == b'RIFF':
+                ctype = 'image/webp'
+            else:
+                ctype = 'application/octet-stream'
+            self._send(200, data, ctype)
             return
 
         if path == '/api/ykt/profile':
@@ -1121,19 +1132,23 @@ class Handler(BaseHTTPRequestHandler):
             lid = one('lesson')
             pid = one('pres')
             try:
+                # 课件接口对 Bearer 是"有则带上"，不是硬门槛：
+                # /api/v3/lesson/presentation/fetch 用 cookie + Referer 也能读
+                # （presentation() 里就是 if bearer 才加 Authorization）。
+                # 早先这里 cred.ready 为假就直接报"拿不到课堂凭据"，把整页
+                # 锁死——签到没拿到 set-auth 时课件就永远打不开。
                 cred = YKT.ykt.creds_for(lid)
-                if not cred.ready:
-                    self._json({'ok': False, 'error': '拿不到课堂凭据（签到失败或该课堂不允许）'})
-                    return
+                bearer = cred.bearer if cred.ready else ''
                 if not pid:
                     items = YKT.ykt.lesson_info(lid)
                     if not items:
-                        self._json({'ok': False, 'error': '没有课件'})
+                        self._json({'ok': False, 'error': '这节课还没有课件'})
                         return
                     pid = items[0]['id']
-                title, slides = YKT.ykt.presentation(pid, cred.bearer)
+                title, slides = YKT.ykt.presentation(pid, bearer)
                 self._json({'ok': True, 'lessonId': lid, 'presId': pid,
-                            'title': title, 'slides': slides})
+                            'title': title, 'slides': slides,
+                            'noBearer': not bool(bearer)})
             except Exception as e:               # noqa: BLE001
                 self._json({'ok': False, 'error': str(e)})
             return

@@ -25,9 +25,10 @@ a = Analysis(                  # noqa: F821
     pathex=[str(WEB), str(SRC)],
     binaries=[],
     datas=[
-        (str(WEB / name), 'web')
-        for name in ('index.html', 'app.css', 'app.js', 'ykt.css', 'ykt.js',
-                     'ppt.js', 'cx.js', 'ascii-sharks.bundle.js')
+        # 整个 web/ 都带上：早先逐个数文件名，漏掉 mobile.css / mobile.js，
+        # 结果 index.html 里那两条引用一直是 404（client-errors.log 里刷屏），
+        # 移动端布局也随之失效。用 glob 收全，以后加文件不用再改这里。
+        (str(p), 'web') for p in WEB.glob('*') if p.is_file()
     ] + [
         # 内置 curl：LibreSSL 版，学校网关按 TLS 指纹拦 HTML 时必须走它
         (str(CURL / name), 'vendor/curl')

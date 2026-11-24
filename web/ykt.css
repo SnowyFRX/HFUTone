@@ -908,23 +908,27 @@ body.is-side-drag .side > .side-shell { transition: none; }
 
 .live-stage {
   position: relative;
-  flex: 0 1 auto;
+  /* 占满卡片里除头尾之外的高度：画面要按容器等比缩放，容器就必须
+     先有确定尺寸，否则 max-height:100% 无从参照（早先 flex:0 1 auto
+     让高度由画面反推，宽高两条约束互相打架，宽度就不跟了）。 */
+  flex: 1 1 auto;
   min-height: 0;
   margin: 0 var(--s4);
   border-radius: var(--r-md);
   background: #14130f;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
 }
 
 #liveCanvas {
   display: block;
-  width: auto;          /* 尺寸全交给 max-*：满宽、或高度不够时按比例缩 */
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
+  /* 尺寸由 ppt.js 的 fit() 按容器算：宽高用同一比例放大/缩小，
+     画面既铺满一边、又不会被拉伸或裁掉。这里只给出居中兜底。 */
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: none;
+  max-height: none;
   visibility: hidden;
 }
 
