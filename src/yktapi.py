@@ -549,46 +549,107 @@ class Ykt:
         return cred
 
     def lesson_info(self, lesson_id: str) -> list[dict]:
-        """官方课件清单。只认 Cookie + Referer，不要 Bearer。
+        """课件清单。
 
-        注意：这个接口（/v/lesson/lesson_info_v2）从 2026-11-24 起会对
-        任何请求返回 500，body 是服务端自己的异常
-        {"errorcode":500,"errormsg":"'NoneType' object has no attribute
-        'set_cookie'"}——它内部某条分支返回了 None，中间件种 cookie 时炸了。
-        换 cookie（web/app）、换 UA、换 Referer、加 classroom_id 都试过，
-        一律 500，不是我们请求的问题。这里把它翻译成人话，别让用户对着
-        一个 "HTTP 500" 发呆。
+        **不要用 /v/lesson/lesson_info_v2**：那个接口对任何请求都返回
+        500（body 是服务端自己的异常 NoneType.set_cookie），网页版
+        2026-11 起也早就不调它了——实测用 Edge 抓网页版真实请求，
+        整条链路里根本没有 lesson_info_v2。
+
+        网页版的做法是：WebSocket 连 /wsapp/ 发 hello，回包里带
+        timeline，里面每条 slide 都有 {"type":"slide","pres":"<19位ID>",
+        "si":当前页,...}，那个 pres 就是 presentation_id；拿到之后
+        再调 /api/v3/lesson/presentation/fetch?presentation_id=<pres>
+        取全部页。这里照抄这条路。
         """
-        r = core.request('GET',
-                         f'{SERVER}/v/lesson/lesson_info_v2?lesson_id={core.urllib.parse.quote(lesson_id)}',
-                         cookie=self.cookie,
-                         referer=SERVER + '/lesson/fullscreen/v3/' + lesson_id,
-                         timeout=20, tag='lesson-info')
-        if r.status == 500 and 'set_cookie' in (r.body or ''):
-            raise RuntimeError('课件接口暂不可用（雨课堂服务端异常，'
-                               '不是本机问题）；课堂上老师推的 PPT 仍可在'
-                               '「直播画面」里看到')
-        if r.status != 200:
-            raise RuntimeError(f'课件接口返回 HTTP {r.status}')
-        if r.looks_like_html:
-            raise RuntimeError('返回的是网页（网关拦截）')
-        d = core.jdata(r.body)
-        if not isinstance(d, dict):
-            raise RuntimeError('没有 data 字段')
-        arr = d.get('presentationList')
-        if not isinstance(arr, list):
-            raise RuntimeError('没有 presentationList（可能不在该课堂）')
+        import yktws
+
+        cred = self.creds_for(lesson_id)
+        if not cred.lesson_token:
+            raise RuntimeError('没有 lessonToken（签到没成功，或这堂课不允许）')
+
+        uid = 0
+        try:
+            uid = int(str((self.store.get_user() or {}).get('userId') or 0) or 0)
+        except (TypeError, ValueError):
+            uid = 0
+
+        headers = {
+            'Accept': '*/*',
+            'User-Agent': core.UA,
+            'Origin': SERVER,
+            'Referer': SERVER + '/lesson/fullscreen/v3/' + lesson_id,
+            'Accept-Language': 'zh-CN,zh;q=0.9',
+        }
+        if self.cookie:
+            headers['Cookie'] = self.cookie
+
+        pres_ids: list[str] = []
+        titles: dict[str, str] = {}
+        ws = None
+        try:
+            ws = yktws.WS(_ws_endpoint(), headers, timeout=12)
+            ws.connect()
+            ws.send_text(json.dumps({
+                'op': 'hello', 'userid': str(uid or ''), 'avatar': '',
+                'role': 'student', 'auth': cred.lesson_token or '',
+                'lessonid': lesson_id or '', 'ver': 1,
+            }, ensure_ascii=False, separators=(',', ':')))
+
+            deadline = time.time() + 12
+            while time.time() < deadline:
+                msg = ws.recv_json(timeout=max(1.0, deadline - time.time()))
+                if msg is None:
+                    if ws._closed:
+                        break
+                    continue
+                # hello / fetchtimeline 都可能带 timeline
+                timeline = msg.get('timeline')
+                if isinstance(timeline, list):
+                    for ev in timeline:
+                        if not isinstance(ev, dict):
+                            continue
+                        if ev.get('type') == 'event' and ev.get('code') == 'SHOW_PRESENTATION':
+                            rep = ev.get('replace')
+                            if isinstance(rep, list) and rep:
+                                last = ''
+                                if pres_ids:
+                                    titles[pres_ids[-1]] = str(rep[0])
+                        elif ev.get('type') == 'slide':
+                            p = str(ev.get('pres') or '')
+                            if p and p not in pres_ids:
+                                pres_ids.append(p)
+                # slidenav 也带当前 pres
+                slide = msg.get('slide')
+                if isinstance(slide, dict):
+                    p = str(slide.get('pres') or '')
+                    if p and p not in pres_ids:
+                        pres_ids.append(p)
+                if msg.get('op') == 'hello' and isinstance(msg.get('timeline'), list):
+                    break
+        except Exception as exc:                          # noqa: BLE001
+            log(f'[课件] WS 取 presentation_id 失败: {exc}')
+        finally:
+            if ws is not None:
+                try:
+                    ws.close()
+                except Exception:                          # noqa: BLE001
+                    pass
+
+        if not pres_ids:
+            raise RuntimeError('这堂课还没有推送过课件（老师没放映 PPT）')
+
         out = []
-        for item in arr:
-            if not isinstance(item, dict):
+        for p in pres_ids:
+            try:
+                title, slides = self.presentation(p, cred.bearer)
+            except Exception as exc:                       # noqa: BLE001
+                log(f'[课件] pres={p} 取页失败: {exc}')
                 continue
-            pid = core.js(item, 'id', 'presentationID')
-            if not pid:
-                continue
-            slides = item.get('slides')
-            out.append({'id': str(pid),
-                        'title': str(core.js(item, 'Title', 'title') or '课堂课件'),
-                        'slideCount': len(slides) if isinstance(slides, list) else 0})
+            out.append({'id': p, 'title': title or titles.get(p) or '课堂课件',
+                        'slideCount': len(slides), 'slides': slides})
+        if not out:
+            raise RuntimeError('课件页拉取失败')
         return out
 
     def presentation(self, pres_id: str, bearer: str) -> tuple[str, list[dict]]:

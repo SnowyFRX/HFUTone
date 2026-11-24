@@ -1132,23 +1132,21 @@ class Handler(BaseHTTPRequestHandler):
             lid = one('lesson')
             pid = one('pres')
             try:
-                # 课件接口对 Bearer 是"有则带上"，不是硬门槛：
-                # /api/v3/lesson/presentation/fetch 用 cookie + Referer 也能读
-                # （presentation() 里就是 if bearer 才加 Authorization）。
-                # 早先这里 cred.ready 为假就直接报"拿不到课堂凭据"，把整页
-                # 锁死——签到没拿到 set-auth 时课件就永远打不开。
-                cred = YKT.ykt.creds_for(lid)
-                bearer = cred.bearer if cred.ready else ''
-                if not pid:
-                    items = YKT.ykt.lesson_info(lid)
-                    if not items:
-                        self._json({'ok': False, 'error': '这节课还没有课件'})
-                        return
-                    pid = items[0]['id']
-                title, slides = YKT.ykt.presentation(pid, bearer)
-                self._json({'ok': True, 'lessonId': lid, 'presId': pid,
-                            'title': title, 'slides': slides,
-                            'noBearer': not bool(bearer)})
+                items = YKT.ykt.lesson_info(lid)
+                if not items:
+                    self._json({'ok': False, 'error': '这堂课还没有推送过课件'})
+                    return
+                # 指定了 pres 就挑那一份，否则取最新的一份
+                pick = items[0]
+                if pid:
+                    for it in items:
+                        if it.get('id') == pid:
+                            pick = it
+                            break
+                self._json({'ok': True, 'lessonId': lid, 'presId': pick.get('id'),
+                            'title': pick.get('title') or '课堂课件',
+                            'slides': pick.get('slides') or [],
+                            'total': len(items)})
             except Exception as e:               # noqa: BLE001
                 self._json({'ok': False, 'error': str(e)})
             return
