@@ -79,6 +79,36 @@ tasks.register('copyWebAssets', Copy) {
 
 tasks.named('preBuild') { dependsOn 'copyWebAssets' }
 
+/**
+ * 图标必须在。踩过一次：tools/sync_android_icon.py 还没跑就 assembleRelease，
+ * 出来的 apk 里 resources.arsc 只有几百字节、没有 mipmap，装上就是系统默认的
+ * 绿色机器人（aapt2 dump badging 里 application icon 是空串）。
+ * 宁可在构建时炸掉，也别再发一个没图标的包。
+ */
+tasks.register('verifyLauncherIcon') {
+    def res = file('src/main/res')
+    doLast {
+        def need = [
+                'mipmap-mdpi/ic_launcher.png',
+                'mipmap-xxhdpi/ic_launcher.png',
+                'mipmap-xxxhdpi/ic_launcher_foreground.png',
+                'mipmap-anydpi-v26/ic_launcher.xml',
+                'values/colors.xml',
+        ]
+        def missing = need.findAll { !new File(res, it).exists() }
+        if (missing) {
+            throw new GradleException(
+                    "缺少启动图标资源：${missing}\n先跑：python tools/sync_android_icon.py")
+        }
+        // anydpi 的 adaptive-icon 必须引到真实存在的 foreground，否则安装后照样回退默认图标
+        def fg = new File(res, 'mipmap-xxxhdpi/ic_launcher_foreground.png')
+        if (fg.length() < 1024) {
+            throw new GradleException("ic_launcher_foreground.png 只有 ${fg.length()} 字节，图标没生成好")
+        }
+    }
+}
+tasks.named('preBuild') { dependsOn 'verifyLauncherIcon' }
+
 chaquopy {
     defaultConfig {
         // 目标 Python 与 buildPython 必须同 minor 版本
