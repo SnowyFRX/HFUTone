@@ -1,0 +1,11 @@
+#!/bin/sh
+# 提交前堵一道：任何看起来像登录态的东西进了暂存区就拒绝提交。
+# 启用一次即可（仓库里已配好 core.hooksPath，新 clone 需要跑一遍）：
+#     git config core.hooksPath .githooks
+# 临时跳过：git commit --no-verify（别习惯性用它）
+python tools/release_check.py --git || {
+    echo
+    echo "[pre-commit] 上面这些不该进仓库：登录态、cookie、日志。"
+    echo "             真误报就把它加进 tools/release_check.py 的 PLACEHOLDER_HINTS。"
+    exit 1
+}

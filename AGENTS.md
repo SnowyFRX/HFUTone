@@ -43,6 +43,20 @@ python tools/release_check.py --dir <任意目录>          # 打包前预检
 每次启动会写，目录被改名复制也认得出）、内容（小文本里的 `sessionid=`、
 `app_cookie`、`"token": "..."`）。命中即退出码 1，别赌。
 
+## 提交前的闸（已装，新 clone 要手动启一次）
+
+```bash
+git config core.hooksPath .githooks     # 指向仓库里的 .githooks/pre-commit
+```
+
+`.githooks/pre-commit` 调 `python tools/release_check.py --git`：暂存区里只要有
+凭据文件名、`.config/`、`*.log`，或者文本里出现 `sessionid=` 这类真凭据形态，
+提交就被拒。GitHub 侧还有 `.github/workflows/privacy.yml` 用同一脚本兜一遍
+（本地 hook 没装、或有人 `--no-verify`，CI 仍会红）。
+
+误报的处理方式：把那个词加进 `tools/release_check.py` 的 `PLACEHOLDER_HINTS`
+（`replay`、`{token}`、`<32HEX>` 这些已经在里面了），而不是给提交加 `--no-verify`。
+
 ## 提交习惯
 
 - 一次改动一个提交，提交信息写**结论和原因**，不只写"改了啥"。
