@@ -20,6 +20,11 @@ from typing import Iterable
 # 只认雨课堂自己的域，避免把画面里无关的二维码（公众号、支付码）当成动态码
 YKT_HOSTS = ('yuketang.cn', 'yuketang.com', 'changjiang.yuketang')
 
+# 学习通的签到码也长在老师屏幕/课件里，形态是
+#   https://mobilelearn.chaoxing.com/widget/sign/e?id=<activeId>&c=<code>&enc=<enc>
+# 解码器（OpenCV）本来就能读任何二维码，之前只是被上面那张雨课堂白名单挡在外面。
+CX_HOSTS = ('mobilelearn.chaoxing.com',)
+
 
 def _decode(img) -> list[str]:
     import cv2
@@ -75,27 +80,42 @@ def decode_bytes(buf: bytes, scale: float = 1.0) -> list[str]:
     return []
 
 
-def pick_ykt(codes: Iterable[str]) -> list[str]:
-    """筛出雨课堂域名的码，并去重保序。"""
+def _pick(codes: Iterable[str], hosts: tuple) -> list[str]:
+    """按域名白名单筛码，去重保序。"""
     out: list[str] = []
     for c in codes or ():
         c = str(c or '').strip()
         if not c:
             continue
         low = c.lower()
-        if any(h in low for h in YKT_HOSTS) and c not in out:
+        if any(h in low for h in hosts) and c not in out:
             out.append(c)
     return out
 
 
-def decode_frame(buf: bytes) -> dict:
-    """给界面/服务端用的统一入口：返回 {ok, urls, all, note}。"""
+def pick_ykt(codes: Iterable[str]) -> list[str]:
+    """筛出雨课堂域名的码，并去重保序。"""
+    return _pick(codes, YKT_HOSTS)
+
+
+def pick_cx(codes: Iterable[str]) -> list[str]:
+    """筛出学习通签到码，并去重保序。"""
+    return _pick(codes, CX_HOSTS)
+
+
+def decode_frame(buf: bytes, hosts: tuple = YKT_HOSTS,
+                 label: str = '雨课堂') -> dict:
+    """给界面/服务端用的统一入口：返回 {ok, urls, all, note}。
+
+    hosts 决定这次认谁的码：默认只认雨课堂（动态考勤），传 CX_HOSTS 就认
+    学习通签到码。画面里同一帧可能同时有别的二维码，白名单是防误判的。
+    """
     raw = decode_bytes(buf)
-    urls = pick_ykt(raw)
+    urls = _pick(raw, hosts)
     if urls:
         return {'ok': True, 'urls': urls, 'all': raw, 'note': ''}
     if raw:
         return {'ok': False, 'urls': [], 'all': raw,
-                'note': '画面里有二维码，但不是雨课堂的码'}
+                'note': f'画面里有二维码，但不是{label}的码'}
     return {'ok': False, 'urls': [], 'all': [],
             'note': '这一帧里没识别到二维码'}

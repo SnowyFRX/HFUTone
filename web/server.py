@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import socket
@@ -38,24 +39,28 @@ import yktqr                                                        # noqa: E402
 PPT_RELAY = hfutplay.RELAY                       # PPT 抽帧转发（一路）
 
 
-def qr_from_relay(tries: int = 4, gap: float = 0.6) -> dict:
-    """从正在播的课件画面里读雨课堂动态码。
+def qr_from_relay(tries: int = 4, gap: float = 0.6,
+                  hosts=None, label: str = '雨课堂') -> dict:
+    """从正在播的课件画面里读二维码。
 
     动态码签到（50070）要的是"把码交给服务器"，不是"伪装成 App 客户端"。
     手机扫码 = 相机读屏幕；我们本来就在拉老师的画面，截帧解码等价，还不用掏手机。
+
+    学习通的签到码同样长在老师屏幕/课件上，机制一模一样，所以 hosts 可切到
+    yktqr.CX_HOSTS —— 解码器不区分平台，之前只是被雨课堂白名单挡在外面。
 
     返回 {ok, urls, note}。PPT_RELAY 没在跑就直接说清楚，别让用户以为码不存在。
     """
     if not PPT_RELAY.running:
         return {'ok': False, 'urls': [],
-                'note': '课件画面没在播，先打开课件再看动态码'}
+                'note': '课件画面没在播，先打开课件再看二维码'}
     seq = int(PPT_RELAY.snapshot().get('seq') or 0)
     last = ''
     for _ in range(max(1, tries)):
         seq, frame, _at = PPT_RELAY.wait_frame(seq, timeout=max(0.2, gap))
         if not frame:
             continue
-        got = yktqr.decode_frame(frame)
+        got = yktqr.decode_frame(frame, hosts=hosts or yktqr.YKT_HOSTS, label=label)
         if got.get('ok'):
             return got
         last = got.get('note') or last
@@ -1059,13 +1064,39 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(item, dict) or not item.get('activeId'):
                 self._json({'ok': False, 'error': '缺少签到项'})
                 return
+            enc_arg = str(body.get('enc') or '')
+            code_arg = str(body.get('code') or '')
+            qr_note = ''
+            # 二维码签到：没给 enc 就先去正在播的课件画面里找码（学习通签到码
+            # 也是打在老师屏幕/PPT 上的，和雨课堂动态码同一种东西）。
+            # 找不到再退回前端弹框手填，不把球直接踢回用户。
+            if str(item.get('signType') or '') == 'qrcode' and not enc_arg:
+                grab = qr_from_relay(tries=5, hosts=yktqr.CX_HOSTS, label='学习通')
+                if grab.get('ok'):
+                    try:
+                        qr_data, qr_err = CX.signer.parse_qr(grab['urls'][0])
+                    except Exception as e:           # noqa: BLE001
+                        qr_data, qr_err = {}, friendly_error(e)
+                    if qr_err:
+                        qr_note = '画面里的码解析失败：' + qr_err
+                    else:
+                        aid_in_qr = str(qr_data.get('activeId') or '')
+                        if aid_in_qr and aid_in_qr != str(item.get('activeId') or ''):
+                            # 抓到的可能是别的课/上一场的码，宁可不动
+                            qr_note = f'画面里的码属于另一场签到（{aid_in_qr}），没有提交'
+                        else:
+                            enc_arg = str(qr_data.get('enc') or '')
+                            code_arg = code_arg or str(qr_data.get('code') or '')
+                            qr_note = 'ok'
+                else:
+                    qr_note = grab.get('note') or '画面里没找到二维码'
             try:
                 CX.sync_location()
                 res = CX.signer.sign(
                     item,
                     pattern=str(body.get('pattern') or ''),
-                    code=str(body.get('code') or ''),
-                    enc=str(body.get('enc') or ''),
+                    code=code_arg,
+                    enc=enc_arg,
                     address=str(body.get('address') or ''),
                     lat=_num(body.get('lat')), lng=_num(body.get('lng')),
                     validate=str(body.get('validate') or ''),
@@ -1075,6 +1106,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:                   # noqa: BLE001
                 self._json({'ok': False, 'error': friendly_error(e)})
                 return
+            if qr_note:
+                res['qrNote'] = qr_note
+                res['autoQr'] = (qr_note == 'ok')
+                if qr_note != 'ok' and not res.get('ok'):
+                    res['detail'] = ((res.get('detail') or '')
+                                     + ' · ' + qr_note).strip(' ·')
             self._json(res)
             return
 
@@ -1088,6 +1125,40 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({'ok': False, 'error': friendly_error(e)})
                 return
             self._json({'ok': True, **res})
+            return
+
+        if path == '/api/cx/qr_image':
+            # 从一张图里读学习通签到码。桌面版可以直接截屏/存图，安卓可以截屏后
+            # 分享/粘贴进来 —— 没有直播流的学校靠这条也能免手抄。
+            b64 = str(body.get('image') or '')
+            local = str(body.get('path') or '')
+            raw = b''
+            try:
+                if b64:
+                    if ',' in b64:
+                        b64 = b64.split(',', 1)[1]
+                    raw = base64.b64decode(b64)
+                elif local:
+                    raw = Path(local).read_bytes()
+            except Exception as e:                   # noqa: BLE001
+                self._json({'ok': False, 'error': friendly_error(e)})
+                return
+            if not raw:
+                self._json({'ok': False, 'error': '没有图片'})
+                return
+            codes = yktqr.decode_bytes(raw)
+            cx_codes = yktqr.pick_cx(codes)
+            if not cx_codes:
+                self._json({'ok': False, 'error': '图里没找到学习通签到码',
+                            'codes': codes[:3]})
+                return
+            try:
+                data, err = CX.signer.parse_qr(cx_codes[0])
+            except Exception as e:                   # noqa: BLE001
+                self._json({'ok': False, 'error': friendly_error(e)})
+                return
+            self._json({'ok': not err, 'data': data, 'error': err,
+                        'code': cx_codes[0]})
             return
 
         if path == '/api/cx/qr_parse':

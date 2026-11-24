@@ -253,7 +253,7 @@
   }
 
   /* --------------------------------------------------------- 签到与补输入 */
-  function askInput(kind, lead, placeholder, onOk) {
+  function askInput(kind, lead, placeholder, onOk, onImage) {
     if (!$('cxInputBackdrop')) { return; }
     $('cxInputTitle').textContent = '补充' + kind;
     $('cxInputLead').textContent = lead || '';
@@ -275,6 +275,36 @@
     if (inp) {
       inp.onkeydown = function (e) { if (e.key === 'Enter') { submit(); } };
       setTimeout(function () { inp.focus(); }, 60);
+
+      /* 二维码签到可以直接粘截图：剪贴板里有图就读成 dataURL 交给后端解码，
+         省掉「先存文件→再扫码→再抄链接」那一圈。拖进来同样接。 */
+      var takeImage = function (file) {
+        if (!file || !onImage) { return false; }
+        var fr = new FileReader();
+        fr.onload = function () {
+          $('cxInputBackdrop').classList.remove('open');
+          onImage(String(fr.result || ''));
+        };
+        fr.readAsDataURL(file);
+        return true;
+      };
+      inp.onpaste = function (e) {
+        var items = (e.clipboardData && e.clipboardData.items) || [];
+        for (var i = 0; i < items.length; i++) {
+          if (items[i].type && items[i].type.indexOf('image') === 0) {
+            e.preventDefault();
+            takeImage(items[i].getAsFile());
+            return;
+          }
+        }
+      };
+      inp.ondragover = function (e) { if (onImage) { e.preventDefault(); } };
+      inp.ondrop = function (e) {
+        if (!onImage) { return; }
+        e.preventDefault();
+        var files = (e.dataTransfer && e.dataTransfer.files) || [];
+        if (files.length) { takeImage(files[0]); }
+      };
     }
   }
 
@@ -308,13 +338,33 @@
       }
       if (needs.indexOf('二维码') >= 0) {
         paintState();
-        askInput('二维码', '把老师屏幕上那个二维码的链接粘进来（手机扫码后能看到的地址）。',
-          'https://mobilelearn.chaoxing.com/widget/sign/e?id=...', function (v) {
-            api('/api/cx/qr_parse', { text: v }).then(function (p) {
+        // 学习通没有「App 头免签」这条路，只能把二维码本身拿到手：
+        //   1) 桌面版已自动从课件画面里抓过了（后端 qr_from_relay），到这里说明没抓到
+        //   2) 截图/图片粘进来（走 /api/cx/qr_image，OpenCV 解码）
+        //   3) 手机扫码后把链接粘进来（走 /api/cx/qr_parse）
+        askInput('二维码',
+          '把二维码图片粘贴/拖进这个框，或粘手机扫码后看到的链接。',
+          'Ctrl+V 粘截图，或 https://mobilelearn.chaoxing.com/widget/sign/e?id=...',
+          function (v) {
+            if (/^https?:\/\//i.test(v)) {
+              api('/api/cx/qr_parse', { text: v }).then(function (p) {
+                if (p && p.ok && p.data) {
+                  signOne(item, { enc: p.data.enc, code: p.data.code || '' });
+                } else {
+                  toast((p && p.error) || '二维码解析失败', 'warn');
+                }
+              });
+              return;
+            }
+            toast('看起来不是链接，试试粘贴二维码图片', 'warn');
+          },
+          function (imageDataUrl) {
+            api('/api/cx/qr_image', { image: imageDataUrl }).then(function (p) {
               if (p && p.ok && p.data) {
-                signOne(item, { enc: p.data.enc });
+                toast('已从图片里读到签到码', 'ok');
+                signOne(item, { enc: p.data.enc, code: p.data.code || '' });
               } else {
-                toast((p && p.error) || '二维码解析失败', 'warn');
+                toast((p && p.error) || '图里没找到学习通签到码', 'warn');
               }
             });
           });
