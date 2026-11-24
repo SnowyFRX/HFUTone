@@ -536,7 +536,13 @@ class HfutLive:
                 args = [path, url]
             else:
                 args = [path, '-window_title', title, '-low_delay', url]
-            return subprocess.Popen(args, close_fds=True)
+            # CREATE_NO_WINDOW：外部播放器大多自带窗口，但万一落到控制台
+            # 程序（或 .bat 包装）上就会弹一个黑框，而且那个黑框关不掉、
+            # 还占着 exe 目录不放（打包时 dist 被锁就是它）。
+            kw = {}
+            if sys.platform == 'win32':
+                kw['creationflags'] = 0x08000000
+            return subprocess.Popen(args, close_fds=True, **kw)
         try:
             os.startfile(url)          # HLS 交给系统默认（浏览器/播放器）
             return True
@@ -561,7 +567,12 @@ class HfutLive:
         args = [ff, '-y', '-i', url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', out_file]
         if duration:
             args = [ff, '-y', '-i', url, '-t', str(duration), '-c', 'copy', out_file]
-        return subprocess.Popen(args)
+        # ffmpeg 是控制台程序，不隐藏就弹黑框；它还会锁住 exe 目录，
+        # 让打包/删除失败。隐藏窗口 + 独立进程组，父进程退出时能整组清理。
+        kw = {}
+        if sys.platform == 'win32':
+            kw['creationflags'] = 0x08000000
+        return subprocess.Popen(args, **kw)
 
 
 def _fmt(live: dict) -> str:

@@ -117,6 +117,12 @@ class MainWindow(QMainWindow):
                 os.kill(pid, signal.SIGTERM)
             except OSError:
                 pass
+        # 停掉 PPT 抽帧的 ffmpeg：它一直在读 exe 目录下的二进制，
+        # 不停就会把 dist 锁住（下次打包/删除直接 PermissionError）。
+        try:
+            sv.PPT_RELAY.stop()
+        except Exception:                     # noqa: BLE001
+            pass
         self.view.stop()
         super().closeEvent(event)
 

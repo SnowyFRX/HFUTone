@@ -860,9 +860,10 @@ body.is-side-drag .side > .side-shell { transition: none; }
 
 .live-card {
   width: calc(var(--side-w) - var(--s4));
-  /* 默认高度跟着画面走（16:9，不留黑边）；挤到没地方时允许收缩，
-     里面那张 canvas 会自己按比例缩，不会把画面裁掉。 */
-  flex: 0 1 auto;
+  /* 卡片自己吃掉 .side 的剩余高度：画面要按容器等比缩放，容器就得先有
+     确定高度。之前这里写 flex:0 1 auto（高度由 canvas 反推），而 stage
+     又改成了 flex:1——两个都不给高度，stage 直接塌成 0，画面就没了。 */
+  flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -908,27 +909,25 @@ body.is-side-drag .side > .side-shell { transition: none; }
 
 .live-stage {
   position: relative;
-  /* 占满卡片里除头尾之外的高度：画面要按容器等比缩放，容器就必须
-     先有确定尺寸，否则 max-height:100% 无从参照（早先 flex:0 1 auto
-     让高度由画面反推，宽高两条约束互相打架，宽度就不跟了）。 */
+  /* 吃掉卡片里除头尾之外的高度。父级 .live-card 现在是 flex:1 有确定高度，
+     这里 flex:1 才真的有空间可分。 */
   flex: 1 1 auto;
   min-height: 0;
   margin: 0 var(--s4);
   border-radius: var(--r-md);
   background: #14130f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
 }
 
 #liveCanvas {
   display: block;
-  /* 尺寸由 ppt.js 的 fit() 按容器算：宽高用同一比例放大/缩小，
-     画面既铺满一边、又不会被拉伸或裁掉。这里只给出居中兜底。 */
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  max-width: none;
-  max-height: none;
+  /* 尺寸由 ppt.js 的 fit() 按容器算：宽高用同一比例，画面既铺满一边、
+     又不会被拉伸或裁掉。这里给个兜底宽度，fit() 一跑就会覆盖。 */
+  max-width: 100%;
+  max-height: 100%;
   visibility: hidden;
 }
 
