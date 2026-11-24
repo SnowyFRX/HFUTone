@@ -325,10 +325,19 @@ def autopilot_tick() -> None:
     """自动推流跑一轮。抽成函数是为了能单独跑一次做验证。"""
     cfg = read_settings()
     if not cfg['autoPlay']:
+        # 只收自动接的那一路。手动拉的画面（PPT_RELAY.manual）是用户自己点
+        # 出来的，关开关不该顺手掐掉；状态也别覆盖成 off——否则用户刚手动
+        # 接上的画面，侧栏却写着"自动推流已关闭"，看着像坏了。
         if PPT_RELAY.running and not PPT_RELAY.manual:
             PPT_RELAY.stop()
         with STATE.lock:
-            STATE.auto.update(phase='off', message='自动推流已关闭')
+            if PPT_RELAY.running and PPT_RELAY.manual:
+                # 手动画面还在跑：保持"在播"，且把 lessonId 一起写上——
+                # 快速路径靠 lessonId 判"这一场已处理过"，缺了它会每 12 秒重跑一遍。
+                STATE.auto.update(phase='playing', message='',
+                                  lessonId=str(STATE.auto.get('lessonId') or ''))
+            else:
+                STATE.auto.update(phase='off', message='自动推流已关闭')
         return
     try:
         api = STATE.ensure_api()
@@ -343,17 +352,25 @@ def autopilot_tick() -> None:
             if PPT_RELAY.running and not PPT_RELAY.manual:
                 PPT_RELAY.stop()
             with STATE.lock:
-                STATE.auto.update(phase='waiting', lessonId='', title='',
-                                  message='等待课程开播', players=0,
-                                  playerNames=[])
+                if PPT_RELAY.running and PPT_RELAY.manual:
+                    # 手动接的画面还在跑，状态保持"在播"，别写成"等待开播"；
+                    # lessonId 一并带上，避免快速路径每轮重跑
+                    STATE.auto.update(phase='playing', message='',
+                                      lessonId=str(STATE.auto.get('lessonId') or ''))
+                else:
+                    STATE.auto.update(phase='waiting', lessonId='', title='',
+                                      message='等待课程开播', players=0,
+                                      playerNames=[])
             return
         cur = lives[0]
         lid = str(cur.get('id') or '')
         with STATE.lock:
             auto = dict(STATE.auto)
-        if PPT_RELAY.running and auto.get('lessonId') == lid:
-            # 这一场已经在推了。只补开还没开的播放器窗口——设置里刚勾上 PPT
-            # 不用等下一节课，下一轮（最多 12 秒）就开出来。
+        # 这一场已经处理过就别重复开播放器。
+        # 注意判据不能用 PPT_RELAY.running：勾了「PPT 独立窗口」时 relay 是停的
+        # （PPT 交给 mpv），用 relay 判会每 12 秒重开一遍 mpv 窗口。
+        # 改成看状态里的 lessonId 是否已对上。
+        if auto.get('lessonId') == lid and auto.get('phase') in ('playing', 'external'):
             done = list(auto.get('playerNames') or [])
             opened, _, _, names = open_players(
                 api, get_streams(api, lid), cfg, skip=done)
@@ -365,16 +382,26 @@ def autopilot_tick() -> None:
         streams = get_streams(api, lid)
         ppt = ppt_stream(streams)
         res = {'ok': False, 'error': ''}
+        want_ppt_window = bool(cfg['streams'].get('ppt'))
         if not ppt:
             res['error'] = '这堂课没有 PPT 流'
         elif HfutLive.stream_alive(ppt.get('hls') or '') is False:
             res['error'] = '画面还没推上来，继续等'
+        elif want_ppt_window:
+            # 勾了「PPT 独立窗口」：PPT 交给 mpv 播，侧栏那路就不再开 ffmpeg。
+            # 早先这里无条件 PPT_RELAY.start()，等于同一路流被 ffmpeg 和 mpv
+            # 各解一遍，CPU 白烧一倍；而且内嵌失败还会被下面的判断静默放过，
+            # 用户只看到侧栏一片黑。
+            if PPT_RELAY.running and not PPT_RELAY.manual:
+                PPT_RELAY.stop()
+            res = {'ok': True, 'error': '', 'external': True}
         else:
             res = PPT_RELAY.start(ppt.get('rtmp') or ppt.get('hls') or '',
                                   title=str(cur.get('name') or ''),
                                   fps=cfg['ppt']['fps'], quality=cfg['ppt']['quality'])
-        if not res.get('ok') and not cfg['streams'].get('ppt'):
-            # 不勾三流时 PPT 是主角：它没就绪这一场就整场不接
+        # 内嵌那路没就绪、且用户也没要独立 PPT 窗口 —— 这一场就整场不接，
+        # 别让侧栏黑着还显示"直播中"。
+        if not res.get('ok') and not want_ppt_window:
             with STATE.lock:
                 STATE.auto.update(phase='no-ppt' if not ppt else 'starting',
                                   lessonId=lid, title=str(cur.get('name') or ''),
@@ -383,8 +410,15 @@ def autopilot_tick() -> None:
         # 这一场已经开过的播放器别再开一遍（PPT 反复重试时尤其要防）
         done = list(auto.get('playerNames') or []) if auto.get('lessonId') == lid else []
         opened, note, _, names = open_players(api, streams, cfg, skip=done)
+        # PPT 交给独立窗口时，侧栏没有内嵌画面，状态要说清楚（别显示"直播中"）
+        if res.get('external'):
+            phase = 'external'
+        elif res.get('ok'):
+            phase = 'playing'
+        else:
+            phase = 'error'
         with STATE.lock:
-            STATE.auto.update(phase='playing' if res.get('ok') else 'error',
+            STATE.auto.update(phase=phase,
                               lessonId=lid, title=str(cur.get('name') or ''),
                               message=('' if res.get('ok') else res.get('error', '')),
                               players=len(done) + opened,

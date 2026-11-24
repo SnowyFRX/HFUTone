@@ -360,6 +360,7 @@
     'no-ppt': '这堂课没有 PPT 流。',
     off: '自动推流已关闭，可以在「设置」里打开。',
     stopped: '已停止拉取画面。',
+    external: 'PPT 已按设置开在独立窗口里，侧栏不再内嵌。',
     error: '画面接入失败，稍后会自动重试。'
   };
 
@@ -386,7 +387,8 @@
       // error 时有具体原因（比如三流模式下 PPT 没流），优先把它显示出来
       var text = (phase === 'error' && auto.message)
         ? auto.message : (PHASE_TEXT[phase] || '还没有直播画面。');
-      setEmpty(text, phase === 'waiting' || phase === 'off' || phase === 'no-ppt');
+      setEmpty(text, phase === 'waiting' || phase === 'off'
+        || phase === 'no-ppt' || phase === 'external');
     }
     S.wasRunning = running;
   }
