@@ -549,14 +549,27 @@ class Ykt:
         return cred
 
     def lesson_info(self, lesson_id: str) -> list[dict]:
-        """官方课件清单。只认 Cookie + Referer，不要 Bearer。"""
+        """官方课件清单。只认 Cookie + Referer，不要 Bearer。
+
+        注意：这个接口（/v/lesson/lesson_info_v2）从 2026-11-24 起会对
+        任何请求返回 500，body 是服务端自己的异常
+        {"errorcode":500,"errormsg":"'NoneType' object has no attribute
+        'set_cookie'"}——它内部某条分支返回了 None，中间件种 cookie 时炸了。
+        换 cookie（web/app）、换 UA、换 Referer、加 classroom_id 都试过，
+        一律 500，不是我们请求的问题。这里把它翻译成人话，别让用户对着
+        一个 "HTTP 500" 发呆。
+        """
         r = core.request('GET',
                          f'{SERVER}/v/lesson/lesson_info_v2?lesson_id={core.urllib.parse.quote(lesson_id)}',
                          cookie=self.cookie,
                          referer=SERVER + '/lesson/fullscreen/v3/' + lesson_id,
                          timeout=20, tag='lesson-info')
+        if r.status == 500 and 'set_cookie' in (r.body or ''):
+            raise RuntimeError('课件接口暂不可用（雨课堂服务端异常，'
+                               '不是本机问题）；课堂上老师推的 PPT 仍可在'
+                               '「直播画面」里看到')
         if r.status != 200:
-            raise RuntimeError(f'HTTP {r.status}')
+            raise RuntimeError(f'课件接口返回 HTTP {r.status}')
         if r.looks_like_html:
             raise RuntimeError('返回的是网页（网关拦截）')
         d = core.jdata(r.body)
@@ -626,8 +639,18 @@ class Ykt:
         cred = self.creds_for(lesson_id)
         if not cred.lesson_token:
             return [], '没有 lessonToken（签到没成功，或这堂课不允许）'
-        return fetch_questions(lesson_id, cred.lesson_token,
-                               user_id_from_cookie(self.cookie), self.cookie, wait)
+        # userid 必须带对，网关按它认人。App 身份的 sessionid 是
+        # "sessionid=xxx; sid=xxx"，不是 JWT，user_id_from_cookie 解不出来
+        # （返回 0）——于是 hello 里 userid 为空，网关不认，连接一直等到超时。
+        # 优先用登录时存下来的 userId，再退回 cookie 解析。
+        uid = 0
+        try:
+            uid = int(str((self.store.get_user() or {}).get('userId') or 0) or 0)
+        except (TypeError, ValueError):
+            uid = 0
+        if not uid:
+            uid = user_id_from_cookie(self.cookie)
+        return fetch_questions(lesson_id, cred.lesson_token, uid, self.cookie, wait)
 
     # -- 答题 -------------------------------------------------------------
     def submit(self, problem_id: str, problem_type: int, result, dt: int,

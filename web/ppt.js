@@ -186,28 +186,6 @@
     if (btnStart) { btnStart.hidden = !showButton; }
   }
 
-  /* 画面按容器等比缩放。
-     背景：canvas 的内部分辨率是源分辨率（1280×720 或老师的实际推流尺寸），
-     CSS 只给 max-width/max-height 时，flex 布局里两条约束会互相抵消——
-     实测表现就是"高度跟着变、宽度不跟"，画面要么左右留黑边要么被压扁。
-     这里用同一个缩放系数算宽高，宽和高必然同步。容器尺寸变了就重算。 */
-  function fit() {
-    if (!canvas || !stage) { return; }
-    var cw = canvas.width, chh = canvas.height;
-    var bw = stage.clientWidth, bh = stage.clientHeight;
-    if (!cw || !chh || !bw || !bh) { return; }
-    var k = Math.min(bw / cw, bh / chh);
-    var w = Math.max(1, Math.round(cw * k));
-    var h = Math.max(1, Math.round(chh * k));
-    if (canvas.style.width !== w + 'px') { canvas.style.width = w + 'px'; }
-    if (canvas.style.height !== h + 'px') { canvas.style.height = h + 'px'; }
-  }
-
-  if (typeof ResizeObserver === 'function' && stage) {
-    new ResizeObserver(fit).observe(stage);
-  }
-  window.addEventListener('resize', fit);
-
   // 点画面放大：卡片只有 310px 宽，1080p 的 PPT 小字要铺满窗口才看得清。
   // canvas 本身搬到放大层里（同一块画布，搬运不丢像素），关掉再搬回卡片。
   var zoomLayer = $('liveZoom');
@@ -282,7 +260,6 @@
         stage.classList.add('is-live');
         setEmpty('', false);
       }
-      fit();          // 源分辨率可能中途变化（换摄像头/换推流尺寸），重算缩放
       S.got += 1;
       if (lagMs >= 0) {
         S.lag = S.lag > 0 ? S.lag * 0.85 + lagMs * 0.15 : lagMs;   // 平滑，免得数字乱跳
