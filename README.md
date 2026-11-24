@@ -5,10 +5,12 @@
 | 功能 | 来源项目 | 实现 |
 | --- | --- | --- |
 | 直播课堂（课表、三路流、mpv 播放） | HFUTlive | Python + PyQt5/QtWebEngine 壳 + 本地 HTTP 服务 + mpv |
-| 长江雨课堂（扫码登录、一键签到、课件、随堂题） | 「冰冰冰糖」ykt_ui（C# WinForms） | Python 重写协议层，TLS 走内置 LibreSSL curl |
-| 学习通签到（五种签到、自动扫课、一键签到） | course_helper（Flutter/Dart，GPL-3.0） | Python 重写协议层，密码学自带实现，无第三方依赖 |
+| 长江雨课堂（App 登录免扫码签到、课件、随堂题） | 「冰冰冰糖」ykt_ui（C# WinForms） | Python 重写协议层，TLS 走内置 LibreSSL curl |
+| 学习通签到（五种签到、自动扫课、一键签到、手动加课） | course_helper（Flutter/Dart，GPL-3.0） | Python 重写协议层，密码学自带实现，无第三方依赖 |
 
 一个窗口：左边直播常驻，右边雨课堂 + 学习通可按需展开；打包成一个 `HFUTone.exe`。
+
+**下载**：[Releases](https://github.com/SnowyFRX/HFUTone/releases) —— Windows x64（zip）与 Android（apk）。
 
 ---
 
@@ -18,27 +20,31 @@
 HFUTone/
 ├── app_qt.pyw            Qt 主窗口（无控制台入口）
 ├── launch_qt.pyw         pythonw 启动壳（双击用）
+├── build.py              打包脚本（备份/还原 .config，别绕过它）
 ├── HFUTone.spec          PyInstaller 打包配置
 ├── version_info.txt      exe 版本资源
 ├── src/
 │   ├── hfutlive.py       直播课堂：CAS 登录、课表、取流、拉播放器
 │   ├── yktcore.py        雨课堂传输层：curl 调用、cookie/DPAPI、日志、回放
-│   ├── yktapi.py         雨课堂业务层：登录/课表/签到/课件/答题/随堂题解析
-│   ├── yktws.py          最小 RFC6455 WebSocket 客户端（随堂题只有 WS 有）
+│   ├── yktapi.py         雨课堂业务层：App 登录/课表/签到/课件（WS 取 pres）/随堂题
+│   ├── yktapplogin.py    雨课堂 App 登录：密码 + 腾讯 TCaptcha → app_cookie
+│   ├── yktws.py          最小 RFC6455 WebSocket 客户端（随堂题、课件清单只有 WS 有）
 │   ├── hfutplay.py       直播画面：ffmpeg 抽帧成 JPEG，帧广播（PPT 内嵌）
 │   ├── cxcrypto.py       学习通要的密码学：纯 Python AES-128 ECB/CBC、RSA 模幂、md5
 │   ├── cxapi.py          学习通接口层：登录/课程/活动/五种签到/验证码/人脸/上传
-│   ├── cxsign.py         学习通编排层：扫课、判类型、自动签、待输入归一化
+│   ├── cxsign.py         学习通编排层：扫课、判类型、自动签、手动加课合并
 │   └── wsserve.py        最小 RFC6455 服务端（把 JPEG 帧推给页面）
 ├── web/
 │   ├── server.py         本地 HTTP 服务（127.0.0.1:8765），三套 API 都在这里
 │   ├── index.html        单页：`.split` 里左直播 + 右侧栏（雨课堂 + 学习通）
 │   ├── app.js / app.css  直播课堂界面（原样保留）
-│   ├── ykt.js / ykt.css  雨课堂界面 + 直播画面卡片 + 设置弹层
+│   ├── ykt.js / ykt.css  雨课堂界面 + 直播画面卡片 + 课件单页放大 + 设置弹层
 │   ├── cx.js             学习通签到界面（复用 ykt.css 的行与按钮骨架）
 │   ├── ppt.js            设置项与画面：WebSocket 收帧、canvas 绘制、点击放大
 │   ├── mobile.css        窄屏单列布局（Android WebView 用，桌面规则不动）
 │   └── mobile.js         Android 行为适配：撤掉直播块、首屏拉一次课程
+├── tools/
+│   └── sync_android_icon.py  从 assets/_src/icon-1024.png 生成安卓各密度图标
 ├── android/              独立 Android App（原生壳 + Chaquopy 内嵌 Python）
 ├── vendor/curl/          内置 LibreSSL 版 curl（.gz，首次运行解压到 .config/bin）
 ├── vendor/ffmpeg/        ffmpeg 7.1（PPT 抽帧用；网页里没有 H.264 解码器）
@@ -63,9 +69,14 @@ python app_qt.pyw
 打包：
 
 ```bat
-python -m PyInstaller HFUTone.spec --noconfirm --clean
+python build.py
 :: 产物 dist\HFUTone\HFUTone.exe
 ```
+
+**打包必须用 `build.py`，不要直接跑 PyInstaller。** `--noconfirm` 会把
+`dist/HFUTone` 整个删掉，而 `.config/`（学习通 cookie、雨课堂凭据、坐标、
+手动加课）就在里面——直接打包等于每次清空登录态，得重新扫码。`build.py` 的
+流程是「备份 .config → PyInstaller → 还原」，备份优先，没有才退到源树的 `.config`。
 
 离线自检（不联网，全部走夹具）：
 
@@ -93,12 +104,21 @@ android/
 构建（本机用 Android Studio 自带的 JDK + gradle 9.6）：
 
 ```bash
-export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"
-export ANDROID_HOME="C:/Users/<你>/AppData/Local/Android/Sdk"
-gradle -p android assembleDebug
-adb install -r android/app/build/outputs/apk/debug/app-debug.apk
-# 产物：android/app/build/outputs/apk/debug/app-debug.apk
+export JAVA_HOME="C:\\Program Files\\Android\\Android Studio\\jbr"
+export ANDROID_HOME="C:\\Users\\<你>\\AppData\\Local\\Android\\Sdk"
+# %.gradle/wrapper/dists/gradle-9.6.0-bin/*/gradle-9.6.0/bin/gradle.bat
+gradle -p android assembleRelease
+# 产物：android/app/build/outputs/apk/release/app-release.apk
+adb install -r android/app/build/outputs/apk/release/app-release.apk
 ```
+
+版本号在 `android/app/build.gradle`（当前 `1.1` / `versionCode 2`）。桌面版业务代码
+改动后**不需要手动同步**：`python.srcDirs = ['../../src', '../../web']`，
+`copyWebAssets` 任务会在 `preBuild` 阶段把 `web/` 复制进 assets。
+
+图标由 `python tools/sync_android_icon.py` 从 `assets/_src/icon-1024.png` 生成：
+传统方形图标（API < 26，5 个密度）+ 自适应图标前景层（内容缩到 72%，留 18dp
+安全边距，`mipmap-anydpi-v26/ic_launcher.xml`）。
 
 `local.properties` 不要写成中文路径 —— Java properties 按 ISO-8859-1 读，用户名带中文
 会直接找不到 SDK。用 `ANDROID_HOME` 环境变量最省事。
@@ -180,56 +200,87 @@ gradle -p android assembleRelease
 - debug 与 release 签名不同，二者不能互相覆盖安装。先在手机上装哪个就一直用哪个。
 
 在本机模拟器（720×1280 / Android 15）上验证过的：冷启动 1.4 秒出界面、雨课堂状态在
-2 秒内由「正在加载…」变成「黄尊鹏 · 暂无在播」、雨课堂/学习通切换、设置弹层（直播两组
+2 秒内由「正在加载…」变成「已登录 · 暂无在播」、雨课堂/学习通切换、设置弹层（直播两组
 已隐藏）、HOME 键退出 25 秒后进程与 HTTP 服务仍在。
 
 ## 雨课堂这一栏怎么用
 
-登录三选一：
+**登录方式：App 账号密码**（`设置 → 雨课堂 → App 登录`）。
 
-1. **扫码登录** —— 点【扫码登录】，微信扫一下，手机上点确认。二维码 60 秒过期后自动换新码。
-2. **粘贴 cookie** —— 浏览器登录 `changjiang.yuketang.cn`，F12 里把 Cookie 整串复制进【粘贴 cookie】。
-3. 已有 cookie 会从 `.config` 里自动读，开箱就是登录态。
+为什么不再是扫码：动态二维码考勤（服务端 `code 50070`）是按**客户端类型**判的，
+浏览器身份一律被拒。而「凭据和身份必须配套」——同一个 web `sessionid` 配上
+`x-client: app` 会直接 `50000 UNAUTHENTICATED`。所以要拿 App 体系自己的凭据，
+只有 `POST /api/v3/user/login/app` 这一条路（密码 + 腾讯 TCaptcha 票据）。
+
+登录后凭据存进 `ykt.json` 的 `app_cookie`，与 web 的 `cookie` 分开，互不覆盖。
 
 登录后：
 
 - **刷新课程** 拉「进行中的课堂」。
 - **一键签到** 串行签所有未签的课，每节单独判定。
-- **看课件** 拉 `presentationList` 与每页图片（图片经本地代理取，绕开前端跨域）。
-- **题目** 连 `wss://…/wsapp/` 拿 `timeline`，解析出单选/多选/填空/判断/主观，填答案直接提交；时限内通道被拒会自动改走补交通道（`problem/retry`）。
+- **看课件** 连 WebSocket 拿 `presentation_id`，再 `presentation/fetch` 取全部页；
+  点任意缩略图进单页大图，`←`/`→` 翻页，`Esc` 退出。
+- **题目** 连 `wss://…/wsapp/`（`userid` 用登录时存的 userId）拿 `timeline`，
+  解析出单选/多选/填空/判断/主观，填答案直接提交；时限内通道被拒会自动改走
+  补交通道（`problem/retry`）。
 
-### 签到判定：只认服务器的 `signinStatus`
+### 签到判定：`on-lesson` 里没有 `signinStatus`
 
-`POST /api/v3/lesson/checkin` 的 `code 0` 只代表**进班成功**——老师还没发起签到时它照样返回 0。
-所以"我签上了没"不靠它，也不靠 `rollcall`：
+`POST /api/v3/lesson/checkin` 的 `code 0` 只代表**进班成功**。
 
-- **`on-lesson` 每节课带的 `signinStatus`** 才是服务器眼中的答案。它 > 0 就直接在列表里标
-  「已签到 · 服务器记录」，红点也不亮——换机器、清过配置都不影响。
-- **`rollcall` 只用来数活动**。它的 `data` 长这样 `{"2688": 56088391}`（键是签到活动 id，
-  值是班号/时间戳），以前那版"遍历前 5 个键、任意值 > 0 就算我签过"是纯脑补：老师一发起点，
-  全班都会被判成已签到。现在 `mine` 一律返回 `False`，判定交给 `signinStatus`。
-- **`jstr()` 先查顶层再查 `data`**。`msg` 在顶层，旧实现只翻 `data`，拿到的是空串，
-  于是"签到成功 / ALREADY / DYNAMIC_QR / LESSON_END"这些文案判断全部失效——这才是最隐蔽的一处。
+早先这里靠 `on-lesson` 每节课的 `signinStatus` 判断，**但那个字段根本不存在**——
+实测（2026-11-24，课堂进行中和已结束都一样）课堂对象只有
+`classroomId / classroomName / courseId / courseName / lessonId / role /
+openTeacher / teacherAvatar / clone`。于是 `_signed_on_server()` 永远返回 `False`，
+不管签没签都显示「已进班 · 待签到」。
+
+真正能问的是 `rollcall`：
+
+- 老师发起签到后会有一条活动记录（`{"2688": 56088391}`，键是活动 id）。
+- **活动数 > 0 且 App 身份进班返回 `code 0`** = 签到完成（这正是工小湖免扫那条路）。
+- 活动数 = 0 才是真的「老师还没发起签到」。
+
+注意 `rollcall` 的 `data` 值（`56088391`）是班号/时间戳，**不是「我签了到」**——
+老师一发起点全班都会被判成已签，绝不能拿它逐条比对。
 
 结论五档：
 
 | 状态 | 含义 | 是否算签到完成 |
 | --- | --- | --- |
-| `checked` | 服务器确认签到（`签到成功`、`data.status=1`，或动态码课堂但 `signinStatus` 已 > 0） | 是，写本地标记 |
-| `already` | 服务器说已签到（`ALREADY`、`已签到, 请勿重复签到`、`您已签到`、`signinStatus` > 0） | 是，写本地标记 |
-| `joined` | 只进了班，考勤里还没有记录（老师多半还没发起签到） | 否，红点保持，界面显示「已进班 · 待签到」 |
-| `need_scan` | 动态二维码课堂（50070）且服务器没记录，必须手机扫码 | 否 |
+| `checked` | 服务器确认签到（`签到成功`、`data.status=1`，或进班成功且 rollcall 活动数 > 0） | 是，写本地标记 |
+| `already` | 服务器说已签到（`ALREADY`、`已签到, 请勿重复签到`、`您已签到`） | 是，写本地标记 |
+| `joined` | 只进了班，老师还没发起签到（rollcall 活动数 = 0） | 否，红点保持，界面显示「已进班 · 待签到」 |
+| `need_scan` | 动态二维码课堂（50070）且拿不到 App 凭据 | 否 |
 | `ended` | 签到已结束（`LESSON_END`） | 否 |
 
-`HFUTone/tests/replay.py` 对着 `fixtures/` 把这几档全跑一遍（`[3]`–`[3e]`），回放用一次性
+`HFUTone/tests/replay.py` 对着 `fixtures/` 把这几档全跑一遍，回放用一次性
 临时配置目录，不碰真实 `.config`。
+
+### 课件：`lesson_info_v2` 是废弃接口
+
+`/v/lesson/lesson_info_v2` 现在对**任何**请求都返回 500，body 是服务端自己的
+异常（`'NoneType' object has no attribute 'set_cookie'`）。换 cookie / UA /
+Referer / 加 `classroom_id` 全试过，不是请求的问题——网页版也早就不调它了。
+
+网页版真实链路（用 Edge 的调试端口抓的）：
+
+```
+1. WS 连 wss://changjiang.yuketang.cn/wsapp/，发 hello
+2. hello 回包带 timeline，每条 slide 形如
+   {"type":"slide","pres":"<19位presentation_id>","si":26,...}
+                          ↑ 这就是 presentation_id
+3. GET /api/v3/lesson/presentation/fetch?presentation_id=<pres>
+   → 200，直接返回全部页
+```
+
+`lesson_info()` 就是照这条路实现的。
 
 ---
 
 ## 学习通这一栏怎么用
 
 顶栏那个「在线课堂」按钮展开右侧栏，里面是一张卡片，卡片顶部两个 tab：
-**雨课堂** / **学习通**。登录状态就写在各自小标题的右边（`● 黄尊鹏 · 暂无在播`）。
+**雨课堂** / **学习通**。登录状态就写在各自小标题的右边（`● 已登录 · 暂无在播`）。
 切换条在卡片内部，整张卡高度固定（CSS 变量 `--side-panel-h`），所以来回切的时候
 下面的直播画面尺寸纹丝不动；卡片自己也不出滚动条——内容多了只有里面的列表在滚，
 滚动条本身藏起来（`scrollbar-width: none`）。
@@ -251,20 +302,61 @@ gradle -p android assembleRelease
 「一键签到」只签**能全自动**的那几种。缺输入的会跳过并在行上写明缺什么，
 点那一行的「签到」会弹出对应输入框，填完自动提交。
 
+### 手动加课：课程中心没收录的课
+
+学习通的 `backclazzdata`（课程中心）**不收录老师临时建、还没正式开课的班**。
+比如老师临时开的小课——你「加入」了班级，但 `backclazzdata` 的 27 个 channel 里
+根本没有它，签到永远扫不到。
+
+这类课只能手动加。设置里填 `courseId / classId / cpi`（cpi 可留空，扫描时现查
+`clazzperson` 并缓存）：
+
+```json
+"cx": {
+  "extraCourses": [
+    { "courseId": "<courseId>", "classId": "<classId>", "cpi": "<cpi>", "name": "课程名" }
+  ]
+}
+```
+
+`CxSigner.scan()` 会把它和 `backclazzdata` 的课合并去重。
+
+**`courseId` 从哪来**：老师发的班级邀请二维码里就带着，解出来形如
+`https://mooc1-api.chaoxing.com/teachingClassPhoneManage/phone/toParticipateCls?inviteCode=...&classId=<classId>&...`，
+用那个 URL 请求一次，返回的 HTML 里有 `<input id="courseId" value="<courseId>">`。
+
 ### 五个必须照抄的地方
 
 1. **所有签到接口都是 `application/x-www-form-urlencoded`**，不是 JSON。
    `yktcore.request()` 为此加了 `form=` 和 `files=` 两条分支。
-2. **签名要 `sc` 和 `cid`。** 它们来自 `getUserInfo` 返回的 `clientId`——那段是拿
-   RSA **公钥**做模幂 `c^e mod n` 再剥 PKCS#1 填充解出来的（不是笔误，服务端就这么干）。
-   没有它们位置签到签不了，所以登录后一定调一次 `refresh_user()`。
-3. **`deviceCode` 每次现算，`uniqueId` 必须固定。** 前者是随机 UUID 过 AES-ECB；
+2. **`stuSignajax` 一律走 GET。** 实测（2026-11-23）同一套字段 POST 过去会被
+   tengine 直接打 **500 HTML**，GET 则正常返回业务文案（`success` / `success2` /
+   `签到失败[90002]` / `距教师指定签到地点893.0米…`）。位置、手势、签到码、
+   二维码、普通五种全走 `_submit()`，默认就是 GET。
+3. **签名要 `sc` 和 `cid`，而解包有坑。** 它们来自 `getUserInfo` 返回的 `clientId` ——
+   拿 RSA **公钥**做模幂 `c^e mod n` 再剥 PKCS#1 填充（不是笔误，服务端就这么干）。
+   剥填充时 **type 字节在 index 1**，不是 2：块是 `00 01 FF FF ... 00 <data>`，
+   按 index 2 去检查会读到 `0xFF`，于是每个块都被判非法丢掉，`clientId` 恒解出空串，
+   `device` 里没有 `sc/cid`，位置签到提交必然 500。这个 bug 藏了很久，因为
+   普通/手势签到不依赖 `sc`，只有位置签到会暴露。
+4. **`deviceCode` 每次现算，`uniqueId` 必须固定。** 前者是随机 UUID 过 AES-ECB；
    后者进了 `schild` 和 User-Agent，每次换会被当成异常设备。
-4. **`Accept-Encoding: gzip` 不能写进请求头。** curl 不像浏览器那样自动解压，
-   带上它服务端就回二进制，`json.loads` 直接炸。要压缩得用 `curl --compressed`。
 5. **cookie 要全收，不能只留 `sessionid`。** 雨课堂那套 `parse_set_cookies` 只挑两个键，
    学习通的登录态散在 `_uid / _d / uf / fid / DSSTASH_LOG` 上，少一个就退成未登录，
    所以 `cxapi.parse_all_cookies()` 单独实现了一份。
+
+### 活动列表：只留窗口内且未签的
+
+`taskactivelist`（App 路）和 `activelist`（web 路）都混着已结束的历史。过滤分两段：
+
+1. **时间窗口**：`startTime <= now <= endTime`。`endTime` 缺失（实测部分老签到是 0）
+   就信 `status`（1=进行中 / 2=已结束），不能当成「永远进行中」——早先那个判断
+   会把一堆早已截止的历史全放进列表。
+2. **`attend_info` 预检**：`status == 1`（已签/代签/请假/缺勤）的直接丢。
+
+`_describe()` 里 `endTime` 缺失时用 `active_info` 的 `starttime + createPageTimeLong`
+推算，前端 `liveSigns()` 渲染时再按当前时间过滤一次——扫描是快照，5 秒窗口的签到
+等界面渲染出来往往已经截止了。
 
 ### 为什么自带一套 AES/RSA
 
