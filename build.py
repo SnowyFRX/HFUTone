@@ -38,13 +38,18 @@ def _copy_tree(src: Path, dst: Path) -> None:
 
 def main() -> int:
     # 1) 备份现有 dist 配置（这是真身，含登录态）
-    if BACKUP.exists():
-        shutil.rmtree(BACKUP, ignore_errors=True)
+    #    顺序很重要：先看源目录在不在，再动旧备份。反过来写会造成
+    #    "先删了备份、源目录又恰好不在了"——备份就此消失（2026-11-24
+    #    实际踩过：连续打包两次，第二次把唯二份登录态一起清掉）。
     if CFG.is_dir():
+        if BACKUP.exists():
+            shutil.rmtree(BACKUP, ignore_errors=True)
         _copy_tree(CFG, BACKUP)
         print(f'[备份] {CFG} -> {BACKUP}')
+    elif BACKUP.is_dir():
+        print(f'[备份] dist 没有 .config，沿用上次备份 {BACKUP}')
     else:
-        print('[备份] dist 没有 .config，跳过')
+        print('[备份] dist 没有 .config，也没有旧备份')
 
     # 2) 打包
     cmd = [sys.executable, '-m', 'PyInstaller', 'HFUTone.spec', '--noconfirm']
