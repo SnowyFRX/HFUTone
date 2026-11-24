@@ -1150,7 +1150,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/cx/chat/scan':
             # 群聊里的签到通知（环信 IM）。课程中心不收录的班只有这条路能看到。
             # 只做"刷新一次最近消息"，不是常驻监听。
-            im = (CX.signer.store.get_user() or {}).get('imAccount') or {}
+            im = (CX.signer.api.store.get_user() or {}).get('imAccount') or {}
             user = str(im.get('userName') or '')
             pwd = str(im.get('password') or '')
             if not user or not pwd:

@@ -1301,58 +1301,6 @@ body.is-side-drag .side > .side-shell { transition: none; }
   vertical-align: 1px;
 }
 
-/* 群聊签到列表：单独一块，上面用发丝线隔开，最多占一半高度 */
-.cx-chat {
-  border-top: 1px solid var(--hairline);
-  max-height: 52%;
-  flex: 0 0 auto;
-}
-
-.cx-chat .cx-row {
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  padding: var(--s3) 2px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.cx-chat .cx-row:last-child { border-bottom: 0; }
-
-.cx-chat .cx-row-main { min-width: 0; flex: 1 1 auto; }
-
-.cx-chat .cx-row-name {
-  font-size: 13.5px;
-  color: var(--ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cx-chat .cx-row-meta {
-  margin-top: 2px;
-  font-size: 11.5px;
-  color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cx-chat .cx-chat-sign {
-  flex: 0 0 auto;
-  appearance: none;
-  font: inherit;
-  font-size: 12px;
-  padding: 6px 12px;
-  border-radius: var(--r-md);
-  border: 1px solid var(--hairline);
-  background: var(--canvas);
-  color: var(--body-strong);
-  cursor: pointer;
-}
-
-.cx-chat .cx-chat-sign:hover { background: var(--tint-4); border-color: var(--hairline-strong); }
-.cx-chat .cx-chat-sign:disabled { opacity: .45; cursor: default; }
-
 .cx-form { display: flex; flex-direction: column; gap: var(--s3); }
 
 .cx-field { display: flex; flex-direction: column; gap: 6px; }

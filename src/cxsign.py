@@ -136,6 +136,15 @@ class CxSigner:
                     continue
                 signs.append(self._describe(c, a))
 
+        # 群聊里的签到通知并进同一份列表：普通签到、群聊签到对用户是同一件事，
+        # 分成两个列表只会让人不知道该点哪个。去重按 activeId。
+        have = {s['activeId'] for s in signs}
+        for item in self._chat_signs():
+            if item['activeId'] in have:
+                continue
+            have.add(item['activeId'])
+            signs.append(item)
+
         with self._lock:
             self._cache = {c['courseId']: c for c in courses}
             self._last_scan = now
@@ -168,6 +177,61 @@ class CxSigner:
             cpi = ''
         self._cpi_cache[key] = cpi
         return cpi
+
+    def _chat_signs(self, max_groups: int = 10, max_msgs: int = 15) -> list[dict]:
+        """从班级群里捞签到通知。
+
+        课程中心不收的班（教务后台直接排的）在活动列表里查不到，但群里会收到
+        签到消息——course_helper 覆盖这块就是靠 IM（push/easemob.dart）。
+        这里只做"刷新时顺手看一眼"，不是常驻监听。
+
+        进来的活动和扫出来的走同一套 _describe，前端不用区分来源；
+        只额外带一个 fromChat，用来在行上标一下"群聊"。
+        """
+        im = (self.api.store.get_user() or {}).get('imAccount') or {}
+        user = str(im.get('userName') or '')
+        pwd = str(im.get('password') or '')
+        if not user or not pwd:
+            return []
+        out: list[dict] = []
+        try:
+            import cxchat
+            tok, err = cxchat.login(user, pwd)
+            if err:
+                core.log(f'[群聊] 登录失败：{err}')
+                return []
+            groups = cxchat.joined_groups(tok, user)
+            for g in groups[:max_groups]:
+                try:
+                    msgs = cxchat.group_messages(tok, g['groupId'], limit=max_msgs)
+                except Exception:                          # noqa: BLE001
+                    continue
+                for a in cxchat.activities_from_messages(msgs):
+                    # 群里也发作业/讨论，只留签到
+                    label = (a.get('atypeName') or '') + (a.get('title') or '') \
+                        + (a.get('subTitle') or '')
+                    if '签到' not in label:
+                        continue
+                    course = {'courseId': a.get('courseId') or '',
+                              'classId': a.get('classId') or '',
+                              'cpi': '', 'name': a.get('courseName') or '',
+                              'teacher': '', 'manual': False, 'inactive': False}
+                    act = {'activeId': a['activeId'],
+                           'name': a.get('title') or '签到',
+                           'desc': a.get('subTitle') or '',
+                           'url': a.get('url') or '',
+                           'startTime': 0, 'endTime': 0,
+                           'signType': '', 'status': 0}
+                    try:
+                        item = self._describe(course, act)
+                    except Exception as exc:               # noqa: BLE001
+                        core.log(f'[群聊] 活动 {a["activeId"]} 解析失败：{exc}')
+                        continue
+                    item['fromChat'] = True
+                    out.append(item)
+        except Exception as exc:                           # noqa: BLE001
+            core.log(f'[群聊] 拉取失败（不影响课程扫描）：{exc}')
+        return out
 
     def _describe(self, course: dict, act: dict) -> dict:
         """把一个活动补成「前端能直接渲染」的样子。"""
