@@ -101,6 +101,24 @@ def can_retry_channel(code: int, err: str) -> bool:
 
 # ------------------------------------------------------------------- 会话
 
+
+def _loc_fallback() -> tuple | None:
+    """设置里填的坐标，位置签到兜底用。读不到就返回 None。"""
+    try:
+        import json as _json
+        import os as _os
+        p = core.CONFIG_DIR / 'settings.json'
+        if not p.exists():
+            return None
+        cfg = _json.loads(p.read_text('utf-8'))
+        loc = (cfg.get('cx') or {}).get('location') or {}
+        lat, lng = loc.get('lat'), loc.get('lng')
+        if lat is None or lng is None:
+            return None
+        return (float(lat), float(lng))
+    except Exception:                                    # noqa: BLE001
+        return None
+
 class Cred:
     """一节课的凭据：签到成功才拿得到，课件和答题都要它。"""
 
@@ -385,6 +403,84 @@ class Ykt:
             pass
         return False
 
+    # -- 位置签到 ---------------------------------------------------------
+    # 参考 course_helper 的 RCCourseApi.getCheckIn / submitLocationCheckIn：
+    # 签到的**中心点与半径是服务端下发的**（老师建签到时就定了），所以位置签到
+    # 本来就该全自动，不该让用户自己去地图上抠经纬度。设置里的坐标只当兜底。
+    LOCATION_ELIG = '/api/v3/lesson/location-checkin/eligibility'
+    LOCATION_SUBMIT = '/api/v3/lesson/location-checkin/submit'
+
+    def location_status(self, bearer: str = '') -> dict:
+        """问一次这次课有没有位置签到、以及服务端给的签到点。"""
+        if core.replay_dir():
+            return {'ok': False, 'need': False, 'replay': True,
+                    'reason': '离线回放模式不查位置签到'}
+        hdr = {'Accept': 'application/json'}
+        if bearer:
+            hdr['Authorization'] = 'Bearer ' + bearer
+        r = core.request('GET', SERVER + self.LOCATION_ELIG, cookie=self.cookie,
+                         referer=SERVER + '/lesson/fullscreen/v3/', timeout=20,
+                         extra_headers=hdr, tag='location-elig')
+        code = core.jcode(r.body)
+        data = core.jdata(r.body) or {}
+        if code != 0 or not isinstance(data, dict):
+            return {'ok': False, 'need': False, 'code': code,
+                    'reason': str(core.jstr(r.body, 'msg') or '')}
+        need = bool(data.get('needLocationSignIn'))
+        sess = data.get('session') if isinstance(data.get('session'), dict) else {}
+        return {'ok': True, 'need': need,
+                'canSign': data.get('canSign'),
+                'reason': str(data.get('reason') or ''),
+                'lat': sess.get('centerLat'), 'lng': sess.get('centerLng'),
+                'name': str(sess.get('locationName') or ''),
+                'radius': sess.get('radiusM'),
+                'endMs': sess.get('endMs'),
+                'session': sess}
+
+    def location_checkin(self, lesson_id: str, bearer: str = '',
+                         fallback: tuple | None = None) -> dict:
+        """有位置签到就按服务端给的中心点提交；没这回事就返回 skipped。
+
+        返回 {status: ok|need_location|skipped|failed, detail, lat, lng, source}
+        source 说明坐标来路：server=老师设的点，config=设置里填的兜底。
+        """
+        st = self.location_status(bearer)
+        if not st.get('ok'):
+            # 查不到 ≠ 签到失败。探测失败必须让调用方按原逻辑继续，
+            # 否则一次网络抖动就能把「已进班待签到」判成 signin 失败。
+            return {'status': 'unknown',
+                    'detail': st.get('reason') or '查不到位置签到状态'}
+        if not st.get('need'):
+            return {'status': 'skipped', 'detail': '这次课不是位置签到'}
+        lat, lng, source = st.get('lat'), st.get('lng'), 'server'
+        if lat is None or lng is None:
+            if fallback and fallback[0] is not None and fallback[1] is not None:
+                lat, lng, source = fallback[0], fallback[1], 'config'
+            else:
+                return {'status': 'need_location',
+                        'detail': '需要位置签到，但服务端没给签到点'}
+        if st.get('canSign') is False:
+            return {'status': 'need_location', 'lat': lat, 'lng': lng,
+                    'source': source,
+                    'detail': st.get('reason') or '当前不在可签到状态（可能超时或不在范围）'}
+        hdr = {'Accept': 'application/json', 'Content-Type': 'application/json'}
+        if bearer:
+            hdr['Authorization'] = 'Bearer ' + bearer
+        body = {'lat': str(lat), 'lng': str(lng), 'lessonId': str(lesson_id),
+                'source': 27, 'address': st.get('name') or ''}
+        r = core.request('POST', SERVER + self.LOCATION_SUBMIT, cookie=self.cookie,
+                         referer=SERVER + '/lesson/fullscreen/v3/', timeout=20,
+                         data=body, with_headers=True, extra_headers=hdr,
+                         tag='location-submit')
+        code = core.jcode(r.body)
+        msg = str(core.jstr(r.body, 'msg') or '')
+        log(f'[位置签到] code={code} msg={msg} src={source} @{lat},{lng}')
+        if code == 0:
+            return {'status': 'ok', 'lat': lat, 'lng': lng, 'source': source,
+                    'detail': f'位置签到成功（签到点来自{("服务端" if source == "server" else "设置")}）'}
+        return {'status': 'failed', 'lat': lat, 'lng': lng, 'source': source,
+                'code': code, 'detail': msg or f'位置签到失败 code={code}'}
+
     def scan(self, qr_url: str) -> tuple[Resp, Cred]:
         """把扫码得到的原始 URL 交给服务器，由它解析出 lessonId 并进班。
 
@@ -506,6 +602,29 @@ class Ykt:
             # 进班返回 code 0 就等于签到完成（这正是工小湖免扫那条路）。
             # 反过来活动数为 0 说明老师还没发起签到，那才叫"已进班待签到"。
             if n_act > 0:
+                # 进班成功 + 有活动，还有一种可能：这是**位置签到**，光进班不算签。
+                # 先问服务端要不要位置，要就按它下发的中心点直接提交（坐标本来就
+                # 是老师建签到定的点，不需要用户去地图上抠）。
+                # 任何异常都不阻断原有判定，只是少一次机会。
+                loc = None
+                try:
+                    loc = self.location_checkin(lesson_id, cred.bearer, fallback=_loc_fallback())
+                except Exception as exc:                 # noqa: BLE001
+                    log(f'[位置签到] 探测失败，按原逻辑继续：{exc}')
+                if loc:
+                    if loc.get('status') == 'ok':
+                        return _ok('checked', loc.get('detail') or '位置签到成功')
+                    if loc.get('status') == 'need_location':
+                        result.update(status='need_location',
+                                      detail=loc.get('detail') or '需要位置签到')
+                        if loc.get('lat') is not None:
+                            result['loc'] = {'lat': loc.get('lat'), 'lng': loc.get('lng'),
+                                             'source': loc.get('source')}
+                        return result
+                    if loc.get('status') == 'failed':
+                        result.update(status='failed',
+                                      detail=loc.get('detail') or '位置签到失败')
+                        return result
                 return _ok('checked', f'已进班且老师已发起签到（活动 {n_act} 条）')
             result.update(ok=True, status='joined',
                           detail='进班成功，老师还没发起签到')
@@ -679,8 +798,27 @@ class Ykt:
                 continue
             cover = str(core.js(item, 'cover', 'src', 'image') or '')
             url = cover if cover.startswith('http') else (CDN + cover.lstrip('/') if cover else '')
-            slides.append({'index': idx, 'cover': cover, 'url': url,
-                           'title': str(core.js(item, 'title') or '')})
+            slide = {'index': idx, 'cover': cover, 'url': url,
+                     'title': str(core.js(item, 'title') or '')}
+            # 课件里可能预埋了随堂题（老师用雨课堂的"插入习题"做的）。
+            # presentation/fetch 会把这些题连同题干、选项一起返回，**即使还没发布**。
+            # 参考 course_helper 的 PresentationSlide.problem(Problem)：
+            #   problemId / problemType / body / options / blanks / dt
+            # 这里原样保留，前端就能在老师翻到那页之前把题目摆出来。
+            prob = item.get('problem')
+            if isinstance(prob, dict):
+                opts = prob.get('options')
+                blanks = prob.get('blanks')
+                slide['problem'] = {
+                    'problemId': str(prob.get('problemId') or ''),
+                    'type': int(prob.get('problemType') or 0),
+                    'body': str(prob.get('body') or ''),
+                    'dt': int(prob.get('dt') or 0),
+                    'published': bool(prob.get('dt')),
+                    'options': opts if isinstance(opts, list) else [],
+                    'blanks': blanks if isinstance(blanks, list) else [],
+                }
+            slides.append(slide)
         log(f'[课件] pres={pres_id}  title={title}  页数={len(slides)}')
         return title, slides
 

@@ -405,16 +405,25 @@
       }
       $('yktPresTitle').textContent = d.title || row.name || '课堂课件';
       var slides = d.slides || [];
-      $('yktPresCount').textContent = slides.length + ' 页';
+      // 课件里预埋的随堂题：老师还没翻到那页、也还没点发布，服务端已经把题干
+      // 和选项一起返回了。这里只做个角标提示，不提前替用户答题（发了没解锁的题
+      // 交上去会被拒）。
+      var withQ = slides.filter(function (s) { return s && s.problem; }).length;
+      $('yktPresCount').textContent = slides.length + ' 页'
+        + (withQ ? ' · 含 ' + withQ + ' 道随堂题' : '');
       if (!slides.length) {
         $('yktPresStage').innerHTML = '<p class="pres-empty">这份课件没有可显示的页</p>';
         return;
       }
       $('yktPresStage').innerHTML = slides.map(function (s, i) {
         var src = s.url ? '/api/ykt/img?u=' + encodeURIComponent(s.url) : '';
-        return src
-          ? '<img loading="lazy" data-i="' + i + '" alt="第 ' + (i + 1) + ' 页" src="' + src + '">'
-          : '<p class="pres-empty">第 ' + (i + 1) + ' 页没有图片</p>';
+        var q = s.problem
+          ? '<span class="pres-q" title="' + esc((s.problem.body || '').slice(0, 60))
+            + (s.problem.published ? '' : '（还没发布）') + '">题</span>'
+          : '';
+        if (!src) { return '<p class="pres-empty">第 ' + (i + 1) + ' 页没有图片' + q + '</p>'; }
+        return '<div class="pres-cell"><img loading="lazy" data-i="' + i + '" alt="第 '
+          + (i + 1) + ' 页" src="' + src + '">' + q + '</div>';
       }).join('');
       PRES.slides = slides;
     });
@@ -802,7 +811,9 @@
             row.checkedAt = '刚刚';
             delete row._state;
           } else {
-            row._state = { text: (r.status === 'need_scan' ? '需手机扫码' : (r.detail || '失败')), cls: 'is-warn' };
+            var badText = r.status === 'need_scan' ? '需手机扫码'
+              : (r.status === 'need_location' ? '需位置签到' : (r.detail || '失败'));
+            row._state = { text: badText, cls: 'is-warn' };
           }
         });
         state.lessons = d.lessons || state.lessons;
@@ -838,7 +849,8 @@
             toast((row.name || '') + ' 已签到', 'ok');
           } else {
             row._state = {
-              text: (d && d.status === 'need_scan') ? '需手机扫码' : ((d && d.detail) || '失败'),
+              text: (d && d.status === 'need_scan') ? '需手机扫码'
+                : ((d && d.status === 'need_location') ? '需位置签到' : ((d && d.detail) || '失败')),
               cls: 'is-warn'
             };
             toast('签到失败：' + ((d && d.detail) || (d && d.error) || '未知'), 'warn');

@@ -757,6 +757,26 @@ body.is-side-drag .side > .side-shell { transition: none; }
   background: #fff;
 }
 
+/* 课件页角标：这页嵌了随堂题（左上角「题」）。老师还没发布时也显示，
+   提示里会写「还没发布」——别提前交，交了会被拒。 */
+.pres-cell {
+  position: relative;
+  min-width: 0;
+}
+
+.pres-q {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(28, 28, 28, .76);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: help;
+}
+
 .pres-empty {
   grid-column: 1 / -1;
   text-align: center;

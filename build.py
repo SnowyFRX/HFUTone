@@ -41,22 +41,41 @@ def main() -> int:
     #    顺序很重要：先看源目录在不在，再动旧备份。反过来写会造成
     #    "先删了备份、源目录又恰好不在了"——备份就此消失（2026-11-24
     #    实际踩过：连续打包两次，第二次把唯二份登录态一起清掉）。
-    if CFG.is_dir():
+    # 判"有实质内容"，不是判目录存在：.config 里只要没有登录态文件，
+    # 拷过去只会把上一份好备份覆盖成空壳（2026-11-25 就这么丢过一次
+    # 用户重登后的凭据）。
+    MEANINGFUL = ('ykt.json', 'cx.json', 'settings.json', 'ykt-cookie.txt')
+
+    def _has_state(d: Path) -> bool:
+        return d.is_dir() and any((d / n).exists() for n in MEANINGFUL)
+
+    if _has_state(CFG):
         if BACKUP.exists():
             shutil.rmtree(BACKUP, ignore_errors=True)
         _copy_tree(CFG, BACKUP)
-        print(f'[备份] {CFG} -> {BACKUP}')
-    elif BACKUP.is_dir():
-        print(f'[备份] dist 没有 .config，沿用上次备份 {BACKUP}')
+        n_before = len(list(CFG.rglob('*')))
+        n_after = len(list(BACKUP.rglob('*'))) if BACKUP.is_dir() else 0
+        print(f'[备份] {CFG} -> {BACKUP}（{n_after}/{n_before} 项）')
+        if not _has_state(BACKUP):
+            print('[失败] 备份不含任何登录态文件，中止打包，免得把现存的也搞丢')
+            return 3
+    elif BACKUP.is_dir() and _has_state(BACKUP):
+        print(f'[备份] dist 没有可用 .config，沿用上次备份 {BACKUP}')
     else:
-        print('[备份] dist 没有 .config，也没有旧备份')
+        print('[备份] 没有可用的 .config（首次运行会重建），继续')
 
     # 2) 打包
     cmd = [sys.executable, '-m', 'PyInstaller', 'HFUTone.spec', '--noconfirm']
     print('[打包]', ' '.join(cmd))
     code = subprocess.call(cmd, cwd=str(HERE))
     if code != 0:
-        print(f'[失败] PyInstaller 退出码 {code}，.config 仍在 {BACKUP}')
+        # --noconfirm 在失败前往往已经删掉了 dist/HFUTone，此时不还原就等于
+        # 把用户登录态一起清空。还原动作必须在这里也做一次。
+        src = BACKUP if _has_state(BACKUP) else SRC_CFG
+        if _has_state(src):
+            _copy_tree(src, CFG)
+            print(f'[还原] 打包失败，已把 {src} 恢复回 {CFG}')
+        print(f'[失败] PyInstaller 退出码 {code}')
         return code
 
     # 3) 还原配置：优先备份，没有就退到源树的 .config
