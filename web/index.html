@@ -44,7 +44,7 @@
 })();
 </script>
 <link rel="stylesheet" href="app.css?v=2026.11.25.1">
-<link rel="stylesheet" href="ykt.css?v=2026.11.25.2">
+<link rel="stylesheet" href="ykt.css?v=2026.11.25.3">
 <link rel="stylesheet" href="mobile.css?v=2026.11.24.5">
 </head>
 <body>
@@ -195,12 +195,15 @@
             <div class="ykt-actions">
               <button id="cxLoginBtn" type="button">登录</button>
               <button id="cxScanBtn" type="button">↻ 刷新签到</button>
+              <button id="cxChatBtn" type="button" title="课程中心不收录的班，签到通知只在班级群里">群聊签到</button>
             </div>
           </div>
 
           <div class="ykt-list" id="cxSigns" aria-label="进行中的签到">
             <!-- 行由 cx.js 注入 -->
           </div>
+
+          <div class="ykt-list cx-chat" id="cxChatList" aria-label="群聊里的签到通知" hidden></div>
 
           <div class="ykt-foot">
             <button class="primary" id="cxSignAll" type="button" disabled>一键签到</button>
@@ -459,8 +462,8 @@
 
 <script src="ascii-sharks.bundle.js?v=2026.11.16.7"></script>
 <script src="app.js?v=2026.11.25.1"></script>
-<script src="ykt.js?v=2026.11.25.2"></script>
-<script src="cx.js?v=2026.11.25.1"></script>
+<script src="ykt.js?v=2026.11.25.3"></script>
+<script src="cx.js?v=2026.11.25.3"></script>
 <script src="ppt.js?v=2026.11.24.1"></script>
 <script>
 /* HTML 与业务脚本版本不一致时只重载一次；NoCache + no-store 保证拿到新资源。 */

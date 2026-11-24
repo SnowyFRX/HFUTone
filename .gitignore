@@ -41,3 +41,8 @@ HFUTone-*.apk
 
 # 本地环境残留（含 C:\Users\<用户名> 的 PATH 备份，绝不入库）
 assets/user-path-backup.txt
+
+# 临时文件与凭据（提交前 git add -A 最容易误带）
+.tmp-*
+*.token
+*.tmp

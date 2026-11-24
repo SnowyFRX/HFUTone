@@ -30,6 +30,7 @@ import uuid as _uuid
 from pathlib import Path
 
 import cxcrypto as cc
+import cxdes
 import yktcore as core
 
 # --------------------------------------------------------------------- 常量
@@ -357,9 +358,30 @@ class Cx:
         if not isinstance(self.device, dict):
             self.device = {}
 
+        # 群聊签到要用的 IM 账号：登录响应 msg.accountInfo.imAccount
+        #   username  明文
+        #   password  DES-ECB 十六进制密文，key = "SL2(M/eD"
+        # 这条照抄 course_helper（lib/api/login.dart:122-127）。
+        im = {}
+        acct = msg.get('accountInfo')
+        if isinstance(acct, dict):
+            im_raw = acct.get('imAccount')
+            if isinstance(im_raw, dict) and im_raw.get('username'):
+                pwd = str(im_raw.get('password') or '')
+                plain = ''
+                if pwd:
+                    try:
+                        plain = cxdes.decrypt_hex(pwd, IM_KEY)
+                    except Exception as exc:                 # noqa: BLE001
+                        log(f'[学习通] IM 密码解密失败：{exc}')
+                im = {'userName': str(im_raw.get('username') or ''),
+                      'password': plain}
+                log('[学习通] 拿到 IM 账号' + ('（密码已解出）' if plain else '（密码未解出）'))
+
         self.store.save_user({
             'uid': self.uid, 'name': self.name, 'school': self.school,
             'avatar': self.avatar, 'deviceInfo': self.device,
+            'imAccount': im,
         })
         return True, ''
 
@@ -376,8 +398,17 @@ class Cx:
 
     # -- 课程与活动 --------------------------------------------------------
 
-    def courses(self) -> list[dict]:
-        """课程列表。只留 state 为真的（在上的课）。"""
+    def courses(self, include_rest: bool = False) -> list[dict]:
+        """课程列表。
+
+        state 为 0 的班**也要留着**：教务后台安排的课常常还没"激活"，
+        或者压根不走课程中心那套状态位，原来的过滤会把它们直接丢掉，
+        于是老师发起签到了这边什么都扫不到（用户反馈："手动加课几乎没卵用，
+        普通用户从 UI 怎么拿 courseId"）。真正的判据应该是活动时间窗口，
+        那件事在 activities() 里做，不该在课程列表这层提前砍。
+
+        include_rest=True 时连 state=0 的一起返回，每项带 state 与 inactive 标记。
+        """
         r = self._get(MOOC_API + '/mycourse/backclazzdata',
                       {'view': 'json', 'getTchClazzType': '1', 'mcode': ''})
         d = self._json(r)
@@ -388,7 +419,9 @@ class Cx:
             if not isinstance(ch, dict):
                 continue
             content = ch.get('content') or {}
-            if content.get('state') in (0, False, '0'):
+            st_raw = content.get('state')
+            inactive = str(st_raw) in ('0', 'False', 'false', 'None') or st_raw in (0, False)
+            if inactive and not include_rest:
                 continue
             # course 有两种形态：旧版是扁平 dict（id/clazzid/name），新版包了一层
             # {"data": [{...}]}。商益学这类走新版，按老结构取字段会全空，
@@ -420,6 +453,8 @@ class Cx:
                 'cpi': str(cpi or ''),
                 'name': str(name or content.get('name') or ''),
                 'teacher': teacher,
+                'state': st_raw,
+                'inactive': inactive,
             })
         return out
 
@@ -621,6 +656,8 @@ def _int(v, default: int = 0) -> int:
 
 # otherId -> 签到类型。0 普通 / 2 二维码 / 3 手势 / 4 位置 / 5 签到码
 SIGN_TYPES = {0: 'normal', 2: 'qrcode', 3: 'pattern', 4: 'location', 5: 'code'}
+# 学习通 IM 密码的 DES key（course_helper: utils/encrypt.dart:40）
+IM_KEY = 'SL2(M/eD'
 
 
 def _sign_type_from_index(idx: int) -> str | None:

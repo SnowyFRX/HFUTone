@@ -93,7 +93,15 @@ class CxSigner:
             except Exception as exc:                        # noqa: BLE001
                 core.log(f'[学习通] 补拉 device 失败: {exc}')
 
-        courses = self.api.courses()
+        # include_rest=True：state=0 的班也扫。教务排的课常常还没"激活"，
+        # 早先过滤掉它们，结果老师发起签到这边一片空白。
+        try:
+            courses = self.api.courses(include_rest=True)
+        except TypeError:                                  # 老签名兜底
+            courses = self.api.courses()
+        rest = [c for c in courses if c.get('inactive')]
+        if rest:
+            core.log(f'[学习通] 其中 {len(rest)} 门未激活（也一并扫签到）')
         # 合并手动加课：课程中心没收录、但老师在上课的课（如商益学"乐"）。
         for ec in self.extra_courses:
             cid = str(ec.get('courseId') or '')
@@ -135,7 +143,9 @@ class CxSigner:
         return self._snapshot()
 
     def _snapshot(self) -> dict:
-        return {'ok': True, 'courses': list(self._cache.values()),
+        rows = list(self._cache.values())
+        return {'ok': True, 'courses': rows,
+                'inactive': sum(1 for c in rows if c.get('inactive')),
                 'signs': list(getattr(self, '_last_signs', [])), 'error': ''}
 
     def _lookup_cpi(self, course_id: str, class_id: str) -> str:

@@ -33,6 +33,7 @@ import yktapi                                                       # noqa: E402
 import yktcore                                                      # noqa: E402
 import cxapi                                                        # noqa: E402
 import cxsign                                                       # noqa: E402
+import cxchat                                                       # noqa: E402
 import yktapplogin                                                  # noqa: E402
 import yktqr                                                        # noqa: E402
 
@@ -1067,6 +1068,25 @@ class Handler(BaseHTTPRequestHandler):
             enc_arg = str(body.get('enc') or '')
             code_arg = str(body.get('code') or '')
             qr_note = ''
+            # 群聊里拿到的活动只给了 activeId：签到类型（普通/二维码/手势/位置/
+            # 签到码）得问一次活动详情。cxsign 内部对"课程中心扫出来的"项会自己
+            # 补，但这条路进来的项没有 signType，先在这儿补齐再走同一套分支。
+            if not str(item.get('signType') or ''):
+                try:
+                    info = CX.signer.api.active_info(str(item.get('activeId') or ''))
+                    other = info.get('otherId')
+                    if other is not None:
+                        st = cxapi.SIGN_TYPES.get(cxapi._int(other), 'normal')
+                        item = dict(item, signType=st)
+                        if not item.get('url'):
+                            item['url'] = str(info.get('url') or '')
+                        if not item.get('courseId'):
+                            item['courseId'] = str(info.get('courseId') or '')
+                        if not item.get('name'):
+                            item['name'] = str(info.get('name') or '')
+                        log(f'[学习通] 群聊活动 {item.get("activeId")} 判定为 {st}')
+                except Exception as e:               # noqa: BLE001
+                    log(f'[学习通] 群聊活动补类型失败：{e}')
             # 二维码签到：没给 enc 就先去正在播的课件画面里找码（学习通签到码
             # 也是打在老师屏幕/PPT 上的，和雨课堂动态码同一种东西）。
             # 找不到再退回前端弹框手填，不把球直接踢回用户。
@@ -1125,6 +1145,38 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({'ok': False, 'error': friendly_error(e)})
                 return
             self._json({'ok': True, **res})
+            return
+
+        if path == '/api/cx/chat/scan':
+            # 群聊里的签到通知（环信 IM）。课程中心不收录的班只有这条路能看到。
+            # 只做"刷新一次最近消息"，不是常驻监听。
+            im = (CX.signer.store.get_user() or {}).get('imAccount') or {}
+            user = str(im.get('userName') or '')
+            pwd = str(im.get('password') or '')
+            if not user or not pwd:
+                self._json({'ok': False, 'error': '没有 IM 账号：在学习通里重新登录一次即可'})
+                return
+            try:
+                tok, err = cxchat.login(user, pwd)
+                if err:
+                    self._json({'ok': False, 'error': err})
+                    return
+                groups = cxchat.joined_groups(tok, user)
+                limit = int(body.get('limit') or 20)
+                acts: list = []
+                for g in groups[:int(body.get('groups') or 30)]:
+                    try:
+                        msgs = cxchat.group_messages(tok, g['groupId'], limit=limit)
+                    except Exception:                # noqa: BLE001
+                        continue
+                    for a in cxchat.activities_from_messages(msgs):
+                        a['groupName'] = g.get('name') or ''
+                        acts.append(a)
+            except Exception as e:                   # noqa: BLE001
+                self._json({'ok': False, 'error': friendly_error(e)})
+                return
+            self._json({'ok': True, 'groups': len(groups), 'items': acts,
+                        'at': int(time.time())})
             return
 
         if path == '/api/cx/qr_image':

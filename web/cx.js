@@ -8,6 +8,64 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  var CHAT = { items: [], at: 0 };
+
+  /* 群聊里的签到通知：课程中心不收录的班（教务直接排的、临时开的）只有这条路
+     能看到。点一次刷新最近消息，列出来再决定签哪条。 */
+  function scanChat() {
+    var box = $('cxChatList');
+    var btn = $('cxChatBtn');
+    if (!box) { return; }
+    if (btn) { btn.disabled = true; }
+    box.hidden = false;
+    box.innerHTML = '<p class="cx-empty">正在读群消息…</p>';
+    api('/api/cx/chat/scan', {}).then(function (d) {
+      if (btn) { btn.disabled = false; }
+      if (!d || !d.ok) {
+        box.innerHTML = '<p class="cx-empty">' + esc((d && d.error) || '拉取失败') + '</p>';
+        return;
+      }
+      CHAT.items = d.items || [];
+      paintChat();
+    }).catch(function (e) {
+      if (btn) { btn.disabled = false; }
+      box.innerHTML = '<p class="cx-empty">' + esc(String(e)) + '</p>';
+    });
+  }
+
+  function paintChat() {
+    var box = $('cxChatList');
+    if (!box) { return; }
+    box.hidden = false;
+    if (!CHAT.items.length) {
+      box.innerHTML = '<p class="cx-empty">最近群里没有签到消息</p>';
+      return;
+    }
+    box.innerHTML = CHAT.items.map(function (it, i) {
+      var name = it.courseName || it.title || '未命名活动';
+      var sub = [it.groupName, it.subTitle].filter(Boolean).join(' · ');
+      return '<div class="cx-row" data-i="' + i + '">'
+        + '<div class="cx-row-main"><div class="cx-row-name">' + esc(name) + '</div>'
+        + '<div class="cx-row-meta">' + esc(sub) + '</div></div>'
+        + '<button type="button" class="cx-chat-sign" data-i="' + i + '">签到</button></div>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.cx-chat-sign'), function (b) {
+      b.addEventListener('click', function () {
+        var it = CHAT.items[parseInt(b.getAttribute('data-i'), 10)];
+        if (!it) { return; }
+        b.disabled = true;
+        b.textContent = '签…';
+        // 直接用 IM 消息里的活动 id；签到类型交给后端按活动的 otherId 判
+        signOne({
+          activeId: it.activeId, courseId: it.courseId, classId: it.classId,
+          name: it.courseName || it.title || '', url: it.url || '',
+          signType: ''
+        }, {});
+        setTimeout(function () { b.disabled = false; b.textContent = '签到'; }, 1500);
+      });
+    });
+  }
+
   var S = {
     loggedIn: false,
     profile: {},
@@ -439,6 +497,7 @@
 
     if ((el = $('cxScanBtn'))) { el.addEventListener('click', doScan); }
     if ((el = $('cxSignAll'))) { el.addEventListener('click', signAll); }
+    if ((el = $('cxChatBtn'))) { el.addEventListener('click', scanChat); }
 
     if ((el = $('cxLogout'))) {
       el.addEventListener('click', function () {
