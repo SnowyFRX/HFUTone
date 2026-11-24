@@ -19,6 +19,11 @@ jobs:
       - name: 检查 git 跟踪文件里有没有凭据
         run: python3 tools/release_check.py --git
 
+      # 静态查「调用了没定义的名字」。2026-11-25 学习通登录报
+      # name 'log' is not defined 就是这类错：语法没错、夹具也走不到。
+      - name: 检查未定义的名字
+        run: python3 tools/namecheck.py
+
       - name: 检查仓库根有没有误放的登录态文件
         run: |
           python3 - <<'PY'

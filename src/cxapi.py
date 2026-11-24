@@ -373,10 +373,10 @@ class Cx:
                     try:
                         plain = cxdes.decrypt_hex(pwd, IM_KEY)
                     except Exception as exc:                 # noqa: BLE001
-                        log(f'[学习通] IM 密码解密失败：{exc}')
+                        core.log(f'[学习通] IM 密码解密失败：{exc}')
                 im = {'userName': str(im_raw.get('username') or ''),
                       'password': plain}
-                log('[学习通] 拿到 IM 账号' + ('（密码已解出）' if plain else '（密码未解出）'))
+                core.log('[学习通] 拿到 IM 账号' + ('（密码已解出）' if plain else '（密码未解出）'))
 
         self.store.save_user({
             'uid': self.uid, 'name': self.name, 'school': self.school,

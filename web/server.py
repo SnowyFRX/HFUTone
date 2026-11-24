@@ -1084,9 +1084,9 @@ class Handler(BaseHTTPRequestHandler):
                             item['courseId'] = str(info.get('courseId') or '')
                         if not item.get('name'):
                             item['name'] = str(info.get('name') or '')
-                        log(f'[学习通] 群聊活动 {item.get("activeId")} 判定为 {st}')
+                        yktcore.log(f'[学习通] 群聊活动 {item.get("activeId")} 判定为 {st}')
                 except Exception as e:               # noqa: BLE001
-                    log(f'[学习通] 群聊活动补类型失败：{e}')
+                    yktcore.log(f'[学习通] 群聊活动补类型失败：{e}')
             # 二维码签到：没给 enc 就先去正在播的课件画面里找码（学习通签到码
             # 也是打在老师屏幕/PPT 上的，和雨课堂动态码同一种东西）。
             # 找不到再退回前端弹框手填，不把球直接踢回用户。
