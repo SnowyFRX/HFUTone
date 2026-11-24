@@ -413,10 +413,45 @@
       $('yktPresStage').innerHTML = slides.map(function (s, i) {
         var src = s.url ? '/api/ykt/img?u=' + encodeURIComponent(s.url) : '';
         return src
-          ? '<img loading="lazy" alt="第 ' + (i + 1) + ' 页" src="' + src + '">'
+          ? '<img loading="lazy" data-i="' + i + '" alt="第 ' + (i + 1) + ' 页" src="' + src + '">'
           : '<p class="pres-empty">第 ' + (i + 1) + ' 页没有图片</p>';
       }).join('');
+      PRES.slides = slides;
     });
+  }
+
+  /* ------------------------------------------------ 课件单页放大
+     缩略图只有 240px 宽，1080p 的 PPT 缩到那个尺寸字全是糊的。
+     点一页进单页大图，←/→ 翻页，Esc 或点空白退出。 */
+  var PRES = { slides: [], at: 0 };
+
+  function pzSrc(s) {
+    return s && s.url ? '/api/ykt/img?u=' + encodeURIComponent(s.url) : '';
+  }
+
+  function pzShow(i) {
+    var box = $('yktPresZoom');
+    var img = $('yktPzImg');
+    if (!box || !img || !PRES.slides.length) { return; }
+    var n = PRES.slides.length;
+    PRES.at = ((i % n) + n) % n;              // 循环翻页
+    var src = pzSrc(PRES.slides[PRES.at]);
+    if (!src) { return; }
+    img.src = src;
+    img.alt = '第 ' + (PRES.at + 1) + ' 页';
+    var c = $('yktPzCounter');
+    if (c) { c.textContent = (PRES.at + 1) + ' / ' + n; }
+    box.hidden = false;
+  }
+
+  function pzHide() {
+    var box = $('yktPresZoom');
+    if (box) { box.hidden = true; }
+  }
+
+  function pzOpen() {
+    var box = $('yktPresZoom');
+    return !!box && !box.hidden;
   }
 
   /* --------------------------------------------------------------- 事件 */
@@ -712,7 +747,24 @@
       }
     });
 
-    $('yktPresClose').addEventListener('click', function () { closeBackdrop('yktPresBackdrop'); });
+    $('yktPresClose').addEventListener('click', function () {
+      pzHide();
+      closeBackdrop('yktPresBackdrop');
+    });
+
+    // 点缩略图 → 单页大图
+    $('yktPresStage').addEventListener('click', function (e) {
+      var img = e.target.closest ? e.target.closest('img[data-i]') : null;
+      if (!img) { return; }
+      pzShow(Number(img.dataset.i) || 0);
+    });
+    $('yktPzClose').addEventListener('click', pzHide);
+    $('yktPzPrev').addEventListener('click', function () { pzShow(PRES.at - 1); });
+    $('yktPzNext').addEventListener('click', function () { pzShow(PRES.at + 1); });
+    // 点图外空白处退出（点图本身不退出，方便放大细看）
+    $('yktPresZoom').addEventListener('click', function (e) {
+      if (e.target === this) { pzHide(); }
+    });
 
     $('yktQClose').addEventListener('click', function () {
       closeBackdrop('yktQBackdrop');
@@ -756,6 +808,12 @@
     });
 
     document.addEventListener('keydown', function (e) {
+      // 单页放大层开着时，方向键翻页、Esc 只关这一层（别把整个课件层也关了）
+      if (pzOpen()) {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); pzShow(PRES.at - 1); return; }
+        if (e.key === 'ArrowRight') { e.preventDefault(); pzShow(PRES.at + 1); return; }
+        if (e.key === 'Escape') { e.preventDefault(); pzHide(); return; }
+      }
       if (e.key !== 'Escape') return;
       if (sideOpen && !$('yktQBackdrop').classList.contains('open')
           && !$('yktPresBackdrop').classList.contains('open')) {
@@ -767,7 +825,11 @@
         if (qTimer) { clearInterval(qTimer); qTimer = null; }
         return;
       }
-      if ($('yktPresBackdrop').classList.contains('open')) { closeBackdrop('yktPresBackdrop'); return; }
+      if ($('yktPresBackdrop').classList.contains('open')) {
+        pzHide();
+        closeBackdrop('yktPresBackdrop');
+        return;
+      }
     });
 
     // 点遮罩关闭（课件层除外，避免误触关掉正在看的页）

@@ -44,7 +44,7 @@
 })();
 </script>
 <link rel="stylesheet" href="app.css?v=2026.11.22.3">
-<link rel="stylesheet" href="ykt.css?v=2026.11.23.1">
+<link rel="stylesheet" href="ykt.css?v=2026.11.24.1">
 <link rel="stylesheet" href="mobile.css?v=2026.11.24.5">
 </head>
 <body>
@@ -302,6 +302,17 @@
   </div>
 </div>
 
+<!-- 雨课堂 · 单页放大：点缩略图进来，左右翻页，Esc 退出 -->
+<div class="pres-zoom" id="yktPresZoom" hidden role="dialog" aria-modal="true" aria-label="课件单页">
+  <button type="button" class="pz-btn pz-prev" id="yktPzPrev" aria-label="上一页">‹</button>
+  <img id="yktPzImg" alt="">
+  <button type="button" class="pz-btn pz-next" id="yktPzNext" aria-label="下一页">›</button>
+  <div class="pz-bar">
+    <span id="yktPzCounter">1 / 1</span>
+    <button type="button" id="yktPzClose" aria-label="关闭">×</button>
+  </div>
+</div>
+
 <!-- 雨课堂 · 随堂题 -->
 <div class="backdrop ykt-pres" id="yktQBackdrop" role="dialog" aria-modal="true" aria-labelledby="yktQTitle">
   <div class="pres-sheet">
@@ -448,7 +459,7 @@
 
 <script src="ascii-sharks.bundle.js?v=2026.11.16.7"></script>
 <script src="app.js?v=2026.11.16.7"></script>
-<script src="ykt.js?v=2026.11.23.1"></script>
+<script src="ykt.js?v=2026.11.24.1"></script>
 <script src="cx.js?v=2026.11.22.5"></script>
 <script src="ppt.js?v=2026.11.22.7"></script>
 <script>
