@@ -81,7 +81,7 @@ python build.py
 离线自检（不联网，全部走夹具）：
 
 ```bat
-set YKT_REPLAY=D:/DSHSYBA/HFUTone/fixtures
+set YKT_REPLAY=%HFUTONE_DIR%/fixtures
 python src/yktapi.py
 ```
 
