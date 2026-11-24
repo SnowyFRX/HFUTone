@@ -42,6 +42,38 @@ NEEDS_TEXT = {
 }
 
 
+# 群聊里收到的签到活动（由前端环信 Web SDK 推送上来，server 调用 set_chat_signs）
+_CHAT_SIGNS: list[dict] = []
+
+
+def set_chat_signs(items: list[dict]) -> int:
+    """前端把 IM 消息里解析出的活动交过来，这里存着等 scan() 合并。
+
+    环信的消息只能由客户端 SDK 收（REST 拿不到历史消息），所以「群聊签到」
+    的数据来源是前端那条 WebSocket，不是后端。存最近 200 条，按 activeId 去重。
+    """
+    seen = {str(x.get('activeId') or '') for x in _CHAT_SIGNS}
+    added = 0
+    for it in items or []:
+        aid = str(it.get('activeId') or it.get('aid') or '')
+        if not aid or aid in seen:
+            continue
+        item = {
+            'activeId': aid,
+            'courseId': str(it.get('courseId') or ''),
+            'classId': str(it.get('classId') or ''),
+            'courseName': str(it.get('courseName') or ''),
+            'title': str(it.get('title') or it.get('atypeName') or '签到'),
+            'desc': str(it.get('atypeName') or ''),
+            'url': str(it.get('url') or ''),
+        }
+        _CHAT_SIGNS.append(item)
+        seen.add(aid)
+        added += 1
+    del _CHAT_SIGNS[:-200]
+    return added
+
+
 class CxSigner:
     """一个学习通账号的签到器。线程安全性交给外层 STATE.lock。"""
 
@@ -188,12 +220,30 @@ class CxSigner:
         进来的活动和扫出来的走同一套 _describe，前端不用区分来源；
         只额外带一个 fromChat，用来在行上标一下"群聊"。
         """
+        out: list[dict] = []
+        # 前端 Web SDK 推上来的活动（唯一能拿到群消息的途径）
+        for it in list(_CHAT_SIGNS):
+            course = {'courseId': it.get('courseId') or '',
+                      'classId': it.get('classId') or '',
+                      'cpi': '', 'name': it.get('courseName') or '',
+                      'teacher': '', 'manual': False, 'inactive': False}
+            act = {'activeId': it['activeId'], 'name': it.get('title') or '签到',
+                   'desc': it.get('desc') or '', 'url': it.get('url') or '',
+                   'startTime': 0, 'endTime': 0, 'signType': '', 'status': 0}
+            try:
+                item = self._describe(course, act)
+            except Exception as exc:                       # noqa: BLE001
+                core.log(f'[群聊] 活动 {it["activeId"]} 解析失败：{exc}')
+                continue
+            item['fromChat'] = True
+            out.append(item)
+        if out:
+            return out
         im = (self.api.store.get_user() or {}).get('imAccount') or {}
         user = str(im.get('userName') or '')
         pwd = str(im.get('password') or '')
         if not user or not pwd:
             return []
-        out: list[dict] = []
         try:
             import cxchat
             tok, err = cxchat.login(user, pwd)

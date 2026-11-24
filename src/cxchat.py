@@ -33,7 +33,11 @@ import yktcore as core
 
 APP_KEY = 'cx-dev#cxstudy'
 ORG, APP = APP_KEY.split('#', 1)
-BASE = f'https://a1.easemob.com/{ORG}/{APP}'
+# 域名必须是 VIP6 的 API 集群。用老的 a1.easemob.com 换 token，任何用户名
+# 都会返回 404 user not found（正确/错误密码、假用户名全都一样），看起来像
+# "账号没建号"，其实是打到了旧集群。依据 clansty/superstar-checkin
+# providers/easemob.ts 的 apiURL = 'https://a1-vip6.easecdn.com'。
+BASE = f'https://a1-vip6.easecdn.com/{ORG}/{APP}'
 REQUEST_TIMEOUT = 20
 
 
@@ -51,9 +55,9 @@ def _call(method: str, url: str, token: str = '', body: dict | None = None) -> d
     kw = {'extra_headers': headers, 'with_headers': True, 'timeout': REQUEST_TIMEOUT,
           'tag': 'cxchat'}
     if body is not None:
-        headers['Content-Type'] = 'application/json'
-        kw['data'] = json.dumps(body, ensure_ascii=False)
-        kw['extra_headers'] = headers
+        # 传 dict，别自己 json.dumps：传输层对 data 会再序列化一次，
+        # 自己 dumps 会变成带引号的字符串字面量，服务端直接解不开。
+        kw['data'] = body
     r = core.request(method, url, cookie='', referer='', **kw)
     data = _json_or_text(r.body)
     if r.status != 200:
@@ -100,13 +104,16 @@ def joined_groups(token: str, username: str) -> list[dict]:
         if not gid:
             continue
         out.append({'groupId': str(gid),
-                    'name': str(g.get('name') or g.get('groupname') or ''),
+                    'name': str(g.get('groupname') or g.get('name') or ''),
                     'owner': str(g.get('owner') or '')})
     return out
 
 
 def group_messages(token: str, group_id: str, limit: int = 20) -> list:
     """群最近消息（REST 按时间倒序返回）。"""
+    # 环信 REST 不开放群历史消息（线上实测 404）。能拉消息的是客户端 SDK /
+    # WebIM 的 XMPP 长连接，那是另一套协议。这里保留调用形状，拿不到就返回空，
+    # 上层按"群里暂时没有可读消息"处理，不影响课程活动扫描。
     url = f'{BASE}/chatgroups/{urllib.parse.quote(group_id)}/messages?limit={max(1, min(50, limit))}'
     data = _call('GET', url, token)
     if isinstance(data, dict):

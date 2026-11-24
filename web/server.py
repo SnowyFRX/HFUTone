@@ -196,6 +196,32 @@ def read_settings() -> dict:
     return blob
 
 
+def im_session() -> dict:
+    """给前端环信 Web SDK 用的连接参数（uid + access token）。
+
+    环信域名必须是 VIP6 的 a1-vip6.easecdn.com —— 老域名下任何用户名都
+    返回 user not found，容易误判成账号问题。
+    """
+    im = (CX.signer.api.store.get_user() or {}).get('imAccount') or {}
+    user = str(im.get('userName') or '')
+    pwd = str(im.get('password') or '')
+    if not user or not pwd:
+        return {'ok': False, 'error': '没有 IM 账号，重新登录一次学习通'}
+    try:
+        tok, err = cxchat.login(user, pwd)
+    except Exception as e:                               # noqa: BLE001
+        return {'ok': False, 'error': friendly_error(e)}
+    if err:
+        return {'ok': False, 'error': err}
+    groups: list[dict] = []
+    try:
+        groups = cxchat.joined_groups(tok, user)[:20]
+    except Exception as e:                               # noqa: BLE001
+        yktcore.log(f'[群聊] 取群列表失败：{e}')
+    return {'ok': True, 'uid': user, 'token': tok, 'appKey': cxchat.APP_KEY,
+            'groups': [{'groupId': g.get('groupId'), 'name': g.get('name')} for g in groups]}
+
+
 def write_settings(patch: dict) -> dict:
     cfg = read_settings()
     if isinstance(patch.get('autoPlay'), bool):
@@ -970,6 +996,10 @@ class Handler(BaseHTTPRequestHandler):
         def one(name: str, default: str = '') -> str:
             return (q.get(name) or [default])[0]
 
+        if path == '/api/cx/im/session':
+            self._json(im_session())
+            return
+
         if path == '/api/cx/state':
             self._json(CX.payload())
             return
@@ -1145,6 +1175,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({'ok': False, 'error': friendly_error(e)})
                 return
             self._json({'ok': True, **res})
+            return
+
+        if path == '/api/cx/im/events':
+            # 前端环信 Web SDK 收到的群消息，把里头的签到活动交过来。
+            # 群消息只能由客户端 SDK 拿（REST 没有历史消息接口），所以这条路
+            # 是「群聊签到」唯一的数据来源。
+            items = body.get('items')
+            if not isinstance(items, list):
+                self._json({'ok': False, 'error': 'items 要数组'})
+                return
+            added = cxsign.set_chat_signs(items)
+            if added:
+                yktcore.log(f'[群聊] 收到 {added} 条新活动（共 {len(cxsign._CHAT_SIGNS)} 条）')
+            self._json({'ok': True, 'added': added,
+                        'total': len(cxsign._CHAT_SIGNS)})
             return
 
         if path == '/api/cx/chat/scan':

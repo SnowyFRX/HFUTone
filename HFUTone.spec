@@ -30,6 +30,9 @@ a = Analysis(                  # noqa: F821
         # 移动端布局也随之失效。用 glob 收全，以后加文件不用再改这里。
         (str(p), 'web') for p in WEB.glob('*') if p.is_file()
     ] + [
+        # web/im/Easemob.js（环信 Web SDK）：子目录也要带上，glob('*') 只扫顶层
+        (str(p), 'web/im') for p in (WEB / 'im').glob('*') if p.is_file()
+    ] + [
         # 内置 curl：LibreSSL 版，学校网关按 TLS 指纹拦 HTML 时必须走它
         (str(CURL / name), 'vendor/curl')
         for name in ('curl.exe.gz', 'libcurl-x64.dll.gz', 'cacert.pem.gz', 'manifest.txt')

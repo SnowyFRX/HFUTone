@@ -233,6 +233,11 @@
   }
 
   /* --------------------------------------------------------------- 扫描 */
+  window.cxRefresh = function () {
+    // im.js 收到群消息后用它把列表刷一遍
+    if (typeof doScan === 'function') { doScan(); }
+  };
+
   function doScan() {
     if (!S.loggedIn) { return Promise.resolve(); }
     S.busy = true;
