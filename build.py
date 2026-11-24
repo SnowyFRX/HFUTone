@@ -67,6 +67,20 @@ def main() -> int:
     else:
         print('[还原] 没有可还原的 .config')
 
+    # 4) 补一个"禁止发布"标记。它是 yktcore 运行时才写的，而 pyinstaller
+    #    根本不运行 exe；还原又是从旧备份拷回来的（里面没有这个文件），
+    #    所以这里得补。tools/release_check.py 认它。
+    guard = CFG / '.do-not-ship'
+    try:
+        CFG.mkdir(parents=True, exist_ok=True)
+        guard.write_text(
+            '运行期配置目录，含登录态与个人信息，禁止打包发布。\n'
+            '打发布包请用 tools/make_release_zip.py（它会排除本目录并自检）。\n',
+            'utf-8')
+        print(f'[标记] {guard}')
+    except OSError as exc:
+        print(f'[警告] 写标记失败（不影响运行）：{exc}')
+
     print('[完成] 打包结束，配置已保住')
     return 0
 

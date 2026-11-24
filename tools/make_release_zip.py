@@ -42,11 +42,19 @@ SECRET_NAMES = {
     'ykt.json', 'cx.json', 'session.json', 'settings.json',
     'ykt-cookie.txt', 'courses.json', 'client-errors.log',
 }
+# yktcore 每次启动会在配置目录里写这个标记（tools/release_check.py 认它）
+SHIP_GUARD = '.do-not-ship'
 
 
 def build(src: Path, out: Path, root_name: str | None = None) -> int:
     if not src.is_dir():
         print(f'[错误] 源目录不存在：{src}', file=sys.stderr)
+        return 2
+    # 传进来的就是配置目录本身（含 yktcore 落的 .do-not-ship）→ 直接拒绝，
+    # 别打成"一个只有登录态的包"再靠后缀过滤去救
+    if (src / SHIP_GUARD).exists():
+        print(f'[错误] {src} 是运行期配置目录（含 {SHIP_GUARD}），不是发布目录。', file=sys.stderr)
+        print('       发布目录应为 dist/HFUTone（exe 所在），不是它的 .config。', file=sys.stderr)
         return 2
     root = root_name or src.name
     total = 0
@@ -75,19 +83,19 @@ def build(src: Path, out: Path, root_name: str | None = None) -> int:
         for f in flagged:
             print('   ', f)
 
-    # 出厂自检：包里不能再出现任何 .config 条目
-    with zipfile.ZipFile(out) as z:
-        leak = [n for n in z.namelist()
-                if '/.config/' in n or n.startswith('.config/')
-                or any(part in SKIP_DIRS for part in n.split('/'))
-                or n.endswith('.log')]
-    if leak:
-        print(f'[失败] zip 里仍有 {len(leak)} 条不该发布的路径：', file=sys.stderr)
-        for n in leak[:10]:
-            print('   ', n, file=sys.stderr)
+    # 终检交给 tools/release_check.py：它认的是"产物里有没有"，不看是谁打的包，
+    # 所以这里不重复实现一套判据（两套很容易慢慢走岔）。
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import release_check                                  # noqa: E402
+
+    hits = release_check.check_zip(out, quiet=True)
+    if hits:
+        print(f'[失败] zip 里仍有 {len(hits)} 处不该发布的内容，已删除该包：', file=sys.stderr)
+        for h in hits[:20]:
+            print('   ', h, file=sys.stderr)
         out.unlink(missing_ok=True)
         return 1
-    print('[自检] 无 .config / 日志条目')
+    print('[自检] 无 .config / 日志 / 明文凭据')
     return 0
 
 

@@ -21,6 +21,28 @@ git show <commit>                  # 某个决定的完整上下文
 - 只有 `x-client: app` 这一个头触发 App 鉴权分支，其它头都不影响
 - App 凭据通吃：`on-lesson` 在 App 头和 web 头下都 200
 
+## 发布物里不许有登录态
+
+`dist/HFUTone/.config/` 是程序自己生成的运行目录，里面是使用者本人的东西：
+`ykt.json`（App cookie）、`ykt-cookie.txt`（sessionid）、`session.json`（网页 token）、
+`cx.json`、`courses.json`（课表）、`logs/`。这些**任何情况下都不能进发布物**。
+
+2026-11-24 出过一次事故：手工把 `dist/HFUTone` 整个压成 zip 挂到 Release，
+`.config` 一起发了出去 —— 公开附件等于把登录态发给全世界，只能靠本人重新登录轮换。
+
+所以发布只走两条，别手工压包：
+
+```bash
+python tools/make_release_zip.py                       # 白名单排除 + 收尾复检
+python tools/release_check.py --zip HFUTone-*.zip      # 独立自检（产物层面）
+python tools/release_check.py --dir <任意目录>          # 打包前预检
+```
+
+`tools/release_check.py` 独立于打包脚本：它只看产物里有什么，三层判据是
+路径（`.config/`、`logs/`、`*.log`）、标记（`.config/.do-not-ship`，yktcore
+每次启动会写，目录被改名复制也认得出）、内容（小文本里的 `sessionid=`、
+`app_cookie`、`"token": "..."`）。命中即退出码 1，别赌。
+
 ## 提交习惯
 
 - 一次改动一个提交，提交信息写**结论和原因**，不只写"改了啥"。

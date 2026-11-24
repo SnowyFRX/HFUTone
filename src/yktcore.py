@@ -172,6 +172,21 @@ CONFIG_FILE = CONFIG_DIR / 'ykt.json'
 LOG_DIR = CONFIG_DIR / 'logs'
 COOKIE_FILE = CONFIG_DIR / 'ykt-cookie.txt'
 
+# 这个目录里放的是登录态（sessionid / App cookie / 学习通 cookie）与课表，
+# 属于使用者本人的东西，永远不能进发布物。踩过一次：手工把 dist/HFUTone
+# 整个压成 zip 挂到 Release，连 .config 一起发了出去。
+# 光靠"打包时记得排除"不够 —— 目录被复制到别处再打包就绕过了，所以在这里
+# 落一个标记文件：tools/release_check.py 见到它直接判非法，不管目录叫什么名字。
+SHIP_GUARD = CONFIG_DIR / '.do-not-ship'
+try:
+    if not SHIP_GUARD.exists():
+        SHIP_GUARD.write_text(
+            '运行期配置目录，含登录态与个人信息，禁止打包发布。\n'
+            '打发布包请用 tools/make_release_zip.py（它会排除本目录并自检）。\n',
+            'utf-8')
+except OSError:
+    pass
+
 
 def log(message: str) -> None:
     """写一行日志：每天一个文件，落不下去就静默丢弃（不影响主流程）。"""
