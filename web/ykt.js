@@ -478,6 +478,7 @@
          kind=3  手机号 + 短信验证码（POST /api/v3/user/code/send 发码） */
     var appTimer = null;
     var appKind = 1;
+    var appCodeTimer = null;
 
     function appShowForm() {
       if ($('yktAppForm')) { $('yktAppForm').hidden = false; }
@@ -489,6 +490,80 @@
     function appStopPoll() {
       if (appTimer) { clearInterval(appTimer); appTimer = null; }
     }
+
+    /* ------------------------------------------------ 发送验证码按钮的状态
+       原来这个按钮点完就只是 disabled 一下再 enabled 回来，人根本看不出
+       码到底发没发出去 —— 尤其验证是在 iframe 里做的，主表单那一侧一点动静
+       都没有，只能靠猜。改成三态：发送中 / 已发送 + 倒计时 / 重新发送。 */
+    function appCodeReset(label) {
+      if (appCodeTimer) { clearInterval(appCodeTimer); appCodeTimer = null; }
+      var b = $('yktAppSendCode');
+      if (!b) { return; }
+      b.disabled = false;
+      b.classList.remove('is-sent');
+      b.textContent = label || '发送验证码';
+    }
+
+    function appCodeCountdown(sec) {
+      if (appCodeTimer) { clearInterval(appCodeTimer); appCodeTimer = null; }
+      var b = $('yktAppSendCode');
+      if (!b) { return; }
+      var left = sec || 60;
+      b.classList.add('is-sent');
+      b.disabled = true;
+      b.textContent = '已发送 ' + left + 's';
+      appCodeTimer = setInterval(function () {
+        left -= 1;
+        if (left <= 0) { appCodeReset('重新发送'); return; }
+        b.textContent = '已发送 ' + left + 's';
+      }, 1000);
+    }
+
+    function appMsg(text, cls) {
+      var m = $('yktAppMsg');
+      if (!m) { return; }
+      m.textContent = text || '';
+      // err-line 是尺寸与位置的基础类，修饰类只能追加；直接覆盖会把
+      // min-height / 字号一起丢掉，提示行变成一行没样式的裸文本
+      m.className = 'err-line' + (cls ? ' ' + cls : '');
+    }
+
+    /* 统一的「回到表单」。任何终态（发码成功 / 失败 / 取消）都走这里，
+       免得人被关在验证页里：上一次 404 被 .then 吞掉之后，界面就停在那儿
+       一动不动，看起来像验证按钮根本没生效。 */
+    function appBackToForm(text, cls) {
+      appStopPoll();
+      appShowForm();
+      if (text) { appMsg(text, cls || ''); }
+    }
+
+    /* 验证页发来的进度通知（见 yktapplogin.captcha_html 里的 notify）。
+       轮询是 900ms 一次，这一步让它看起来是"立刻返回"。 */
+    window.addEventListener('message', function (ev) {
+      var d = ev.data;
+      if (!d || d.src !== 'hfutone-ykt-captcha') { return; }
+      var fr = $('yktAppFrame');
+      if (fr && fr.contentWindow && ev.source && ev.source !== fr.contentWindow) { return; }
+      var msg = $('yktAppStageMsg');
+      if (d.phase === 'submitting') {
+        if (msg) { msg.className = 'err-line'; msg.textContent = '验证通过，正在提交…'; }
+      } else if (d.phase === 'sent') {
+        appBackToForm('验证码已发送，填进来再点「去验证并登录」');
+        appCodeCountdown(60);
+        if ($('yktAppCode')) { $('yktAppCode').focus(); }
+      } else if (d.phase === 'ok') {
+        // 真正的收尾交给轮询（它还要刷新课表、关弹层），这里只先把话说清楚
+        if (msg) {
+          msg.className = 'app-result is-ok';
+          msg.textContent = '✅ App 身份可用' + (d.name ? '：' + d.name : '');
+        }
+      } else if (d.phase === 'fail') {
+        appBackToForm('❌ ' + (d.error || '人机验证没走完'), 'is-err');
+      } else if (d.phase === 'closed' || d.phase === 'cancelled') {
+        appStopPoll();
+        appShowForm();
+      }
+    });
 
     /* 切换「密码 / 验证码」时同步字段与分段控件的选中态 */
     function appSyncMode() {
@@ -526,17 +601,29 @@
     function appPoll() {
       appStopPoll();
       appTimer = setInterval(function () {
+        var msg = $('yktAppStageMsg');
         api('/api/ykt/applogin/state').then(function (d) {
           if (!d) { return; }
-          var msg = $('yktAppStageMsg');
-          if (d.state === 'verifying' && msg) { msg.textContent = '正在登录…'; }
-          if (d.state === 'sent') {
+          var st = d.state || '';
+          if (st === 'waiting') {
+            if (msg && msg.className !== 'app-result') {
+              msg.className = 'err-line';
+              msg.textContent = '请在下面完成人机验证';
+            }
+            return;
+          }
+          if (st === 'sending' || st === 'verifying') {
+            if (msg) { msg.className = 'err-line'; msg.textContent = d.message || '正在处理…'; }
+            return;
+          }
+          if (st === 'sent') {
             // 短信第一步完成：人机验证用掉了，回表单填验证码
-            appStopPoll();
-            appShowForm();
-            if ($('yktAppMsg')) { $('yktAppMsg').textContent = '验证码已发送，填进来再点「去验证并登录」'; }
+            appBackToForm('验证码已发送，填进来再点「去验证并登录」');
+            appCodeCountdown(60);
             if ($('yktAppCode')) { $('yktAppCode').focus(); }
-          } else if (d.state === 'ok') {
+            return;
+          }
+          if (st === 'ok') {
             appStopPoll();
             var who = (d.user && d.user.name) || '';
             if (msg) {
@@ -551,27 +638,34 @@
               appShowForm();
               pull().then(function () { refresh(true); });
             }, 2200);
-          } else if (d.state === 'fail') {
-            appStopPoll();
+            return;
+          }
+          if (st === 'fail') {
             var ver = d.verify || {};
             var name = (d.user && d.user.name) || '';
-            if (msg) {
-              // 登录成功但身份不可用 —— 这是最容易被误读成「什么也没变」的情况，
-              // 必须在这里用大字说清楚，而不是靠一条 2.6 秒的 toast。
-              if (name && ver && ver.note) {
-                msg.className = 'app-result is-warn';
-                msg.textContent = '⚠️ 账号登录成功（' + name + '），但 App 身份不可用\n'
-                  + (ver.note || '')
-                  + (ver.code ? '（code=' + ver.code + '）' : '')
-                  + '\n雨课堂仍按浏览器身份工作，签到照旧；关闭本窗口即可。';
-              } else {
-                msg.className = 'app-result is-err';
-                msg.textContent = '❌ 登录失败：' + (d.message || '未知原因');
-              }
+            var text;
+            if (name && ver && ver.note) {
+              // 登录成功但身份不可用 —— 最容易被误读成「什么也没变」的情况
+              text = '⚠️ 账号登录成功（' + name + '），但 App 身份不可用：'
+                + (ver.note || '')
+                + (ver.code ? '（code=' + ver.code + '）' : '')
+                + '；雨课堂仍按浏览器身份工作，签到照旧。';
+            } else {
+              text = '❌ ' + (d.message || '登录失败');
             }
+            toast(text, 'err');
+            appBackToForm(text, 'is-err');
+            return;
+          }
+          /* st === 'idle'：什么都没开始，保持现状 */
+        }).catch(function () {
+          // 端点异常绝不能静默：上一次就是这里 404 被吞，验证完页面一动不动
+          if (msg && msg.className !== 'app-result') {
+            msg.className = 'err-line';
+            msg.textContent = '读不到登录状态，点「返回重填」重试';
           }
         });
-      }, 1200);
+      }, 900);
     }
 
     if ($('yktAppMode')) {
@@ -580,7 +674,8 @@
         var k = t && t.getAttribute ? t.getAttribute('data-kind') : '';
         if (!k) { return; }
         appKind = parseInt(k, 10) === 3 ? 3 : 1;
-        if ($('yktAppMsg')) { $('yktAppMsg').textContent = ''; }
+        appMsg('');
+        appCodeReset('发送验证码');
         appSyncMode();
       });
     }
@@ -588,29 +683,36 @@
     if ($('yktAppSendCode')) {
       $('yktAppSendCode').addEventListener('click', function () {
         var phone = ($('yktAppAccount') && $('yktAppAccount').value || '').trim();
-        var msg = $('yktAppMsg');
         if (!/^1\d{10}$/.test(phone)) {
-          if (msg) { msg.textContent = '先填 11 位手机号'; }
+          appMsg('先填 11 位手机号');
           return;
         }
-        $('yktAppSendCode').disabled = true;
-        if (msg) { msg.textContent = '正在打开人机验证…'; }
+        var b = $('yktAppSendCode');
+        b.disabled = true;
+        b.classList.remove('is-sent');
+        b.textContent = '发送中…';
+        appMsg('正在打开人机验证…');
         api('/api/ykt/applogin/sendsms', { phone: phone }).then(function (d) {
-          $('yktAppSendCode').disabled = false;
           if (!d || !d.ok) {
-            if (msg) { msg.textContent = (d && d.error) || '发送失败'; }
+            appCodeReset('重新发送');
+            appMsg((d && d.error) || '发送失败');
             return;
           }
-          if (msg) { msg.textContent = ''; }
+          appMsg('');
           appOpenStage(d.page);
+        }).catch(function (e) {
+          appCodeReset('重新发送');
+          appMsg('打不开人机验证：' + (e && e.message ? e.message : e));
         });
       });
     }
 
     if ($('yktAppBtn')) {
       $('yktAppBtn').addEventListener('click', function () {
+        appStopPoll();
         appShowForm();
-        if ($('yktAppMsg')) { $('yktAppMsg').textContent = ''; }
+        appMsg('');
+        appCodeReset('发送验证码');
         openBackdrop('yktAppBackdrop');
         if ($('yktAppAccount')) { $('yktAppAccount').focus(); }
       });
@@ -620,6 +722,8 @@
       $('yktAppCancel').addEventListener('click', function () {
         appStopPoll();
         api('/api/ykt/applogin/cancel', {});
+        appCodeReset('发送验证码');
+        appMsg('');
         closeBackdrop('yktAppBackdrop');
         appShowForm();
       });
@@ -627,8 +731,11 @@
 
     if ($('yktAppBack')) {
       $('yktAppBack').addEventListener('click', function () {
+        // 返回重填：会话作废，避免残留的 stage 把下一次验证带到错误的分支
         appStopPoll();
         api('/api/ykt/applogin/cancel', {});
+        appCodeReset($('yktAppSendCode') && $('yktAppSendCode').classList.contains('is-sent')
+          ? '重新发送' : '发送验证码');
         appShowForm();
       });
     }
@@ -639,20 +746,23 @@
         var secret = appKind === 3
           ? ($('yktAppCode') && $('yktAppCode').value || '').trim()
           : ($('yktAppPassword') && $('yktAppPassword').value || '');
-        var msg = $('yktAppMsg');
         if (!acc || !secret) {
-          if (msg) { msg.textContent = appKind === 3 ? '手机号和验证码都要填' : '账号和密码都要填'; }
+          appMsg(appKind === 3 ? '手机号和验证码都要填' : '账号和密码都要填');
           return;
         }
         $('yktAppGo').disabled = true;
-        if (msg) { msg.textContent = '正在准备…'; }
+        appMsg('正在准备人机验证…');
         api('/api/ykt/applogin/start', { account: acc, password: secret, kind: appKind }).then(function (d) {
           $('yktAppGo').disabled = false;
           if (!d || !d.ok) {
-            if (msg) { msg.textContent = (d && d.error) || '启动失败'; }
+            appMsg((d && d.error) || '启动失败');
             return;
           }
+          appMsg('');
           appOpenStage(d.page);
+        }).catch(function (e) {
+          $('yktAppGo').disabled = false;
+          appMsg('启动失败：' + (e && e.message ? e.message : e));
         });
       });
     }

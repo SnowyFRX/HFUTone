@@ -779,6 +779,17 @@ class AppLoginState:
             self.stage = ''
             self.message = '验证码已发送'
 
+    def mark_sending(self, message: str = '正在发送验证码…') -> None:
+        """发码请求已发出、还在等服务端回执。
+
+        没有这个中间态时 state 一直停在 waiting，前端只能显示「请在下面完成
+        人机验证」——人早滑完了，看着像什么都没发生。send_sms 的 timeout 是
+        25 秒，这段静默足够让人以为卡死。
+        """
+        with self.lock:
+            self.state = 'sending'
+            self.message = message
+
     def clear(self) -> None:
         with self.lock:
             self.account = ''
@@ -1107,6 +1118,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, html.encode('utf-8'), 'text/html; charset=utf-8')
             return
 
+        # 人机验证流程的进度查询。只读，走 GET。
+        # 之前只注册在 _ykt_post 里，而前端 appPoll() 用 api() 不带 body 调用 → 发的是
+        # GET → 落到这里 404（api() 拿到 !r.ok 直接 throw，而那处 .then 没有 .catch），
+        # 于是「验证完不回填页面」：state 从来没被读到过一次，iframe 里的验证页只能干等。
+        # 端点同时保留 POST 分支做兼容，但真正的修复是这里必须有。
+        if path == '/api/ykt/applogin/state':
+            self._json(APPLOGIN.payload())
+            return
+
         if path == '/api/ykt/state':
             self._json(YKT.payload())
             return
@@ -1261,6 +1281,9 @@ class Handler(BaseHTTPRequestHandler):
                         APPLOGIN.message = '发码会话已失效，请重新填手机号'
                     self._json({'ok': False, 'error': APPLOGIN.message})
                     return
+                # 先落中间态：send_sms 最长 25 秒，这段时间前端要能显示「正在发送」，
+                # 否则用户看到的是「还没验证」的旧文案。
+                APPLOGIN.mark_sending()
                 try:
                     sent, why = yktapplogin.send_sms(acc, ticket, rand)
                 except Exception as e:               # noqa: BLE001

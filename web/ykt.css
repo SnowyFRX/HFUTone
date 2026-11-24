@@ -373,6 +373,16 @@ body.is-side-drag .side > .side-shell { transition: none; }
   min-height: 40px;
   padding: 0 14px;
   white-space: nowrap;
+  min-width: 112px;              /* 倒计时文案比「发送验证码」长，别让它抖宽度 */
+  font-variant-numeric: tabular-nums;
+}
+
+/* 码发出去了：绿色描边 + 「已发送 45s」。原来这里只有一个 disabled，
+   人看不出到底发没发，尤其是验证在 iframe 里做的，主表单一侧毫无动静。 */
+.code-row button.is-sent {
+  border-color: rgba(47, 125, 79, .45);
+  background: rgba(47, 125, 79, .08);
+  color: #2f7d4f;
 }
 
 /* 面板自己设了 display:flex，会压过浏览器默认的 [hidden]{display:none}，
@@ -1119,7 +1129,8 @@ body.is-side-drag .side > .side-shell { transition: none; }
 
 .sheet-app-login iframe {
   width: 100%;
-  height: 420px;
+  /* TCaptcha 的滑块弹层是居中 fixed，420 时下半截会被 iframe 裁掉，给到 480 */
+  height: 480px;
   border: 1px solid var(--hairline);
   border-radius: var(--r-md);
   background: #faf9f7;

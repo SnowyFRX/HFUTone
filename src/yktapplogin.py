@@ -105,6 +105,11 @@ def captcha_html(callback_path: str = '/api/ykt/applogin/callback') -> str:
 
     TCaptcha 的回调里 r.ret === 0 表示验证通过，r.ticket / r.randstr 就是要的东西。
     这里不引任何框架，失败就把错误也回传，方便前端显示原因。
+
+    除了回传 ticket，还会用 postMessage 告诉父窗口当前进行到哪一步
+    （hfutone-ykt-captcha 的 phase）。父窗口据此立刻切回表单，不用等轮询——
+    轮询只是兜底，单靠它做过一次事故：state 端点当时只注册在 POST 上，
+    前端发的 GET 拿到 404，于是验证页做完什么都不会发生。
     """
     return f'''<!doctype html>
 <html lang="zh-CN"><head>
@@ -127,8 +132,11 @@ def captcha_html(callback_path: str = '/api/ykt/applogin/callback') -> str:
     cursor:pointer;
   }}
   button:hover {{ background:#f2f0ec; }}
+  button:disabled {{ opacity:.5; cursor:default; }}
   .primary {{ background:#1c1c1c; color:#fff; border-color:#1c1c1c; }}
   .primary:hover {{ background:#000; }}
+  .links {{ display:flex; gap:10px; }}
+  .links button {{ min-height:34px; font-size:13px; padding:0 16px; }}
   #msg {{ min-height:20px; font-size:13px; }}
   .ok {{ color:#2f7d4f; }}
   .err {{ color:#c64545; }}
@@ -137,19 +145,32 @@ def captcha_html(callback_path: str = '/api/ykt/applogin/callback') -> str:
 </head>
 <body>
   <h1>先过一下人机验证</h1>
-  <p>雨课堂的 App 登录要求官方验证码，这一步没法跳过。验证通过后会自动继续登录。</p>
+  <p>雨课堂的 App 登录要求官方验证码，这一步没法跳过。验证通过后这里会自动继续。</p>
   <button id="go" class="primary" type="button">开始验证</button>
+  <div class="links">
+    <button id="back" type="button">回窗口</button>
+  </div>
   <p id="msg"></p>
 
 <script>
 (function () {{
   var CALLBACK = {json.dumps(callback_path)};
+  var APPID = {json.dumps(CAPTCHA_APPID)};
   var btn = document.getElementById('go');
+  var back = document.getElementById('back');
   var msg = document.getElementById('msg');
+  var busy = false;
 
   function show(text, cls) {{
     msg.textContent = text || '';
     msg.className = cls || '';
+  }}
+
+  /* 告诉父窗口进行到哪一步。父窗口只认 hfutone-ykt-captcha 这个 src。 */
+  function notify(phase, extra) {{
+    var payload = {{ src: 'hfutone-ykt-captcha', phase: phase }};
+    if (extra) {{ for (var k in extra) {{ payload[k] = extra[k]; }} }}
+    try {{ window.parent.postMessage(payload, '*'); }} catch (e) {{ /* 独立打开时没有父窗口 */ }}
   }}
 
   function post(payload) {{
@@ -160,31 +181,58 @@ def captcha_html(callback_path: str = '/api/ykt/applogin/callback') -> str:
     }}).then(function (r) {{ return r.json().catch(function () {{ return {{}}; }}); }});
   }}
 
+  function fail(text) {{
+    show(text, 'err');
+    notify('fail', {{ error: text }});
+    btn.disabled = false;
+    btn.textContent = '再试一次';
+    busy = false;
+  }}
+
+  back.addEventListener('click', function () {{
+    notify('closed');
+  }});
+
   btn.addEventListener('click', function () {{
+    if (busy) {{ return; }}
+    if (typeof TencentCaptcha !== 'function') {{
+      show('验证组件没加载出来（检查网络或代理），点「回窗口」先退出', 'err');
+      notify('fail', {{ error: 'TCaptcha 脚本未加载' }});
+      return;
+    }}
     show('正在打开验证…');
-    var cap = new TencentCaptcha({json.dumps(CAPTCHA_APPID)}, function (res) {{
+    notify('opening');
+    var cap = new TencentCaptcha(APPID, function (res) {{
       if (res && res.ret === 0 && res.ticket && res.randstr) {{
-        show('验证通过，正在登录…');
+        busy = true;
+        show('验证通过，正在提交…');
+        notify('submitting');
         btn.disabled = true;
+        btn.textContent = '请稍候…';
         post({{ ticket: res.ticket, rand: res.randstr }}).then(function (d) {{
           if (d && d.sent) {{
             // 短信登录第一步：码发出去了，这里就结束，回主窗口填验证码
             show('验证码已发送，回窗口填写即可', 'ok');
+            notify('sent');
+            btn.textContent = '已发送';
+            busy = false;
             return;
           }}
           if (d && d.ok) {{
             show('登录成功：' + (d.name || '') + (d.school ? ' · ' + d.school : ''), 'ok');
-            setTimeout(function () {{ post({{ done: true }}); }}, 400);
-          }} else {{
-            show('登录失败：' + ((d && d.error) || '未知原因'), 'err');
-            btn.disabled = false;
+            notify('ok', {{ name: d.name || '', school: d.school || '' }});
+            btn.textContent = '已登录';
+            busy = false;
+            return;
           }}
+          fail('登录失败：' + ((d && d.error) || '未知原因'));
         }}, function (e) {{
-          show('回传失败：' + e, 'err');
-          btn.disabled = false;
+          fail('回传失败：' + e + '，点「回窗口」重试');
         }});
       }} else {{
         show(res && res.ret === 2 ? '你取消了验证' : '验证没通过，再试一次', 'err');
+        /* 取消不算失败，但也要让父窗口知道人还卡在这一层 */
+        notify('cancelled');
       }}
     }});
     cap.show();
