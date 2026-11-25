@@ -680,9 +680,24 @@
     return api('/api/cx/sign', payload).then(function (d) {
       S.busy = false;
       if (d && d.ok) {
+        // 立刻就地把这条标成已签并重绘，不干等十几秒的全量扫描
+        var doneAid = String(item.activeId || '');
+        S.signs.forEach(function (row) {
+          if (String(row.activeId || '') === doneAid) {
+            row.signed = true;
+            row.status = 1;
+            row.statusText = '已签到';
+            row.canAuto = false;
+            row.missing = [];
+          }
+        });
+        paintState();
+        paintList();
         toast((item.courseName || '') + ' ' + (item.name || '') + ' 签到成功', 'ok');
         if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
-        return doScan();
+        resumeAuto();
+        // 后端 _refresh_one 已同步更新快照，用轻量的 refresh() 代替耗时十几秒的 doScan()
+        return refresh();
       }
       // 缺东西：按 missing 弹对应输入框，填完再签一次（保留已有 extra）
       var needs = (d && d.needs) || [];
@@ -801,11 +816,25 @@
       var ok = (d.done || []).length;
       var bad = (d.failed || []).length;
       var skip = (d.skipped || []).length;
+      var doneIds = {};
+      (d.done || []).forEach(function (r) { if (r && r.activeId) { doneIds[String(r.activeId)] = true; } });
+      S.signs.forEach(function (row) {
+        if (doneIds[String(row.activeId || '')]) {
+          row.signed = true;
+          row.status = 1;
+          row.statusText = '已签到';
+          row.canAuto = false;
+          row.missing = [];
+        }
+      });
+      paintState();
+      paintList();
+      if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
       toast('签到完成：成功 ' + ok
         + (bad ? '，失败 ' + bad : '')
         + (skip ? '，跳过 ' + skip : ''),
         bad ? 'warn' : 'ok');
-      doScan();
+      refresh();
     });
   }
 

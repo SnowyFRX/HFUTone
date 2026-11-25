@@ -89,6 +89,8 @@ textarea:focus {
   flex-basis: var(--side-w);
   width: var(--side-w);
   padding-left: var(--s4);
+  overflow-x: hidden;
+  overflow-y: auto;
   opacity: 1;
   transform: none;
   visibility: visible;
@@ -156,8 +158,9 @@ body.is-side-drag .side > .side-shell { transition: none; }
 .side-shell {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   width: calc(var(--side-w) - var(--s4));
-  height: var(--side-panel-h);
+  height: auto;
   border: 1px solid var(--hairline);
   border-radius: var(--r-xl);
   background: var(--canvas);
@@ -203,11 +206,9 @@ body.is-side-drag .side > .side-shell { transition: none; }
 }
 
 .side-panels {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   min-height: 0;
-  /* 卡片自己不出滚动条：滚动交给里面的 .ykt-list，
-     免得右边缘挂一条灰条，看着像内容没放完 */
-  overflow: hidden;
+  overflow: visible;
 }
 
 /* 卡片外观归 .side-shell，内层面板只留排版，别再套一层边框 */
@@ -217,10 +218,10 @@ body.is-side-drag .side > .side-shell { transition: none; }
   box-shadow: none;
   background: none;
   padding: var(--s3) var(--s5) var(--s3);
-  height: 100%;
+  height: auto;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   animation: sidePanelIn .24s var(--side-ease) both;
 }
 
@@ -587,14 +588,10 @@ body.is-side-drag .side > .side-shell { transition: none; }
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--hairline);
-  /* 卡片高度固定，列表吃掉剩下的空间；内容多了在这里滚，
-     滚动条本身藏起来（还能滚，只是不占那一条视觉） */
-  flex: 1 1 auto;
+  /* 列表按实际条目数自适应撑开，不额外在内部上下滚动 */
+  flex: 0 0 auto;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  overflow: visible;
 }
 
 .ykt-list::-webkit-scrollbar { width: 0; height: 0; display: none; }

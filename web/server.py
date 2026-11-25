@@ -1396,6 +1396,9 @@ class Handler(BaseHTTPRequestHandler):
             if not raw:
                 self._json({'ok': False, 'error': '没有图片'})
                 return
+            if not yktqr.decoder_available():
+                self._json({'ok': False, 'error': '本机缺少图片二维码解码库（请安装 opencv-python-headless）'})
+                return
             codes = yktqr.decode_bytes(raw)
             cx_codes = yktqr.pick_cx(codes)
             if not cx_codes:

@@ -26,13 +26,25 @@ YKT_HOSTS = ('yuketang.cn', 'yuketang.com', 'changjiang.yuketang')
 CX_HOSTS = ('mobilelearn.chaoxing.com',)
 
 
+def decoder_available() -> bool:
+    """本机是否具备二维码图片解码能力（OpenCV + NumPy）。"""
+    try:
+        import cv2                             # noqa: F401
+        import numpy                           # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _decode(img) -> list[str]:
     import cv2
     try:
         det = cv2.QRCodeDetector()
         ok, texts, _pts, _ = det.detectAndDecodeMulti(img)
         if ok:
-            return [t for t in texts if t]
+            res = [t for t in texts if t]
+            if res:
+                return res
     except Exception:                      # noqa: BLE001  OpenCV 版本差异
         pass
     try:
@@ -63,12 +75,36 @@ def decode_bytes(buf: bytes, scale: float = 1.0) -> list[str]:
     if scale and scale != 1.0:
         img = cv2.resize(img, None, fx=scale, fy=scale,
                          interpolation=cv2.INTER_CUBIC)
-    found = _decode(img)
-    if found:
-        return found
-    # 再来一轮：灰度 + 自适应阈值，屏幕反光/低对比度时明显更容易出码
+
+    # 截图经常紧贴二维码边缘裁剪，缺少白色静区（quiet zone）会导致 OpenCV 解不出；
+    # 先补一圈白边，再按原图/多尺度/灰度二值化逐层尝试。
+    h, w = img.shape[:2]
+    pad = max(16, min(48, min(h, w) // 10))
+    padded = cv2.copyMakeBorder(img, pad, pad, pad, pad,
+                                cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+    candidates = [padded, img]
+    max_dim = max(h, w)
+    if max_dim > 1200:
+        f = 900.0 / max_dim
+        candidates.append(cv2.resize(padded, None, fx=f, fy=f,
+                                     interpolation=cv2.INTER_AREA))
+    elif max_dim < 500:
+        candidates.append(cv2.resize(padded, None, fx=1.8, fy=1.8,
+                                     interpolation=cv2.INTER_CUBIC))
+
+    for cand in candidates:
+        found = _decode(cand)
+        if found:
+            return found
+
+    # 再来一轮：灰度 + Otsu / 自适应阈值，屏幕反光/低对比度/暗色主题截图更容易出码
     try:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(padded, cv2.COLOR_BGR2GRAY)
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        found = _decode(otsu)
+        if found:
+            return found
         for block in (31, 51):
             th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                        cv2.THRESH_BINARY, block, 7)
