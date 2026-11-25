@@ -620,6 +620,26 @@
       if (ev.detail) { body.appendChild(det); }
       row.appendChild(badge);
       row.appendChild(body);
+      if (ev.status === 'need_action' && ev.refId) {
+        var actBtn = document.createElement('button');
+        actBtn.type = 'button';
+        actBtn.className = 'autosign-act-btn';
+        if (ev.platform === 'cx') {
+          actBtn.textContent = (ev.detail && ev.detail.indexOf('验证码') >= 0) ? '去验证' : '手动签到';
+          actBtn.addEventListener('click', function () {
+            if (window.HFUTCx && window.HFUTCx.signById) {
+              window.HFUTCx.signById(ev.refId, ev.item || null);
+            }
+          });
+        } else if (ev.platform === 'ykt') {
+          actBtn.textContent = '去处理';
+          actBtn.addEventListener('click', function () {
+            var tabYkt = $('tabYkt');
+            if (tabYkt) { tabYkt.click(); }
+          });
+        }
+        row.appendChild(actBtn);
+      }
       box.appendChild(row);
     });
   }
@@ -632,19 +652,6 @@
   }
 
   if (asPanel) {
-    var nowBtn = $('autoSignNowBtn');
-    if (nowBtn) {
-      nowBtn.addEventListener('click', function () {
-        nowBtn.disabled = true;
-        nowBtn.textContent = '检查中…';
-        api('/api/autosign/trigger', { platform: 'all' }).then(function (d) {
-          nowBtn.disabled = false;
-          nowBtn.textContent = '立即检查';
-          if (d && d.state) { renderAutoSign(d.state); }
-          else { refreshAutoSignState(); }
-        });
-      });
-    }
     var clearBtn = $('autoSignClearBtn');
     if (clearBtn) {
       clearBtn.addEventListener('click', function () {

@@ -650,6 +650,7 @@
       S.busy = false;
       if (d && d.ok) {
         toast((item.courseName || '') + ' ' + (item.name || '') + ' 签到成功', 'ok');
+        if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
         return doScan();
       }
       // 缺东西：按 missing 弹对应输入框，填完再签一次
@@ -864,9 +865,31 @@
     start();
   }
 
+  function signById(activeId, fallbackItem) {
+    var aid = String(activeId || '');
+    var found = null;
+    for (var i = 0; i < S.signs.length; i++) {
+      if (String(S.signs[i].activeId || '') === aid) { found = S.signs[i]; break; }
+    }
+    var target = found || fallbackItem;
+    if (!target || !target.activeId) {
+      toast('未找到该签到活动，先点「刷新签到」试试', 'warn');
+      return;
+    }
+    // 人工从守护卡片点进来：允许走完整人工验证/补输入流程
+    if (target.needCaptcha) {
+      capOpen(target.url || 'https://mobilelearn.chaoxing.com/', function (v) {
+        signOne(target, { validate: v });
+      }, true);
+      return;
+    }
+    signOne(target);
+  }
+
   window.HFUTCx = {
     refresh: refresh,
     scan: doScan,
+    signById: signById,
     state: function () { return S; }
   };
 })();

@@ -990,6 +990,8 @@ class CxState:
                 data = self.signer.scan(force=force)
                 self.last_scan = time.time()
                 self.error = '' if data.get('ok') else str(data.get('error') or '')
+                if data.get('ok') and 'AUTOSIGN' in globals():
+                    AUTOSIGN.sync_cx_signs(data.get('signs') or [])
                 return data
             except Exception as exc:                 # noqa: BLE001
                 self.error = friendly_error(exc)
@@ -1288,6 +1290,12 @@ class Handler(BaseHTTPRequestHandler):
                 if qr_note != 'ok' and not res.get('ok'):
                     res['detail'] = ((res.get('detail') or '')
                                      + ' · ' + qr_note).strip(' ·')
+            if res.get('ok'):
+                AUTOSIGN.mark_resolved(
+                    'cx', str(item.get('activeId') or ''),
+                    detail=res.get('detail') or '手动签到成功',
+                    count_signed=False,
+                )
             self._json(res)
             return
 
@@ -1736,6 +1744,11 @@ class Handler(BaseHTTPRequestHandler):
                         if row['lessonId'] == lid:
                             row['checkedAt'] = YKT.ykt.store.load_checked().get(lid, '')
                             row['signinStatus'] = 1
+                AUTOSIGN.mark_resolved(
+                    'ykt', lid,
+                    detail=res.get('detail') or '手动签到成功',
+                    count_signed=False,
+                )
             self._json(res)
             return
 

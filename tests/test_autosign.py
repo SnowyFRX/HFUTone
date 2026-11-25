@@ -198,6 +198,17 @@ check(r_dyn1 and r_dyn1['status'] == 'need_action', '动态验证码回执转为
 check(r_dyn2 and r_dyn2['status'] == 'exhausted', '动态验证码后不再自动重试')
 check(cx_signer.sign_calls.count('A_DYN') == 1, '动态验证码活动只尝试一次即交由人工')
 
+snap_mid = engine.status_payload()
+check(snap_mid['stats']['needAction'] == 2, f'此时待人工应为 2，实际 {snap_mid["stats"]["needAction"]}')
+cap_ev = next((e for e in snap_mid['events'] if e.get('refId') == 'A_CAP'), None)
+check(bool(cap_ev and cap_ev.get('item') and cap_ev['item'].get('needCaptcha')),
+      'need_action 事件应附带 item 供前端直接弹出人工验证')
+
+# 手动完成 A_CAP 签到后，对应 need_action 应立即翻为 signed 并减少待人工计数
+resolved_n = engine.mark_resolved('cx', 'A_CAP', detail='手动签到成功')
+check(resolved_n == 1, 'mark_resolved 成功同步翻正 A_CAP 记录')
+check(engine.status_payload()['stats']['needAction'] == 1, '手动签完 A_CAP 后待人工降为 1')
+
 
 # ---- 4. 低频兜底轮询（学习通 + 雨课堂） ----------------------------------
 print('--- 4. 学习通与雨课堂低频轮询兜底 ---')
@@ -241,7 +252,8 @@ check(pykt2.get('signed') == 1, 'joined 冷却到期后成功补签 L2')
 time.sleep(0.15)
 snap = engine.status_payload()
 check(snap['stats']['signed'] == 4, f'统计已签应为 4，实际 {snap["stats"]["signed"]}')
-check(snap['stats']['needAction'] == 3, f'统计待人工应为 3，实际 {snap["stats"]["needAction"]}')
+# A_CAP 已手动消掉，A_DYN 在轮询同步中已消掉，仅剩雨课堂 L3 仍为待人工
+check(snap['stats']['needAction'] == 1, f'统计当前待人工应为 1，实际 {snap["stats"]["needAction"]}')
 check(len(webhooks) >= 4, f'Webhook 异步推送触发次数正常（{len(webhooks)} 次）')
 
 if fails:

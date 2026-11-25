@@ -197,6 +197,75 @@ class AutoSignEngine:
     def clear_events(self) -> None:
         with self.lock:
             self._events.clear()
+            self._recount_need_action_locked()
+
+    def _recount_need_action_locked(self) -> None:
+        self._stats['needAction'] = sum(
+            1 for ev in self._events if ev.get('status') == 'need_action'
+        )
+
+    def mark_resolved(self, platform: str, ref_id: str,
+                      detail: str = '已完成签到', count_signed: bool = False) -> int:
+        """手动签到成功或后续扫描确认已签后，同步将对应「需人工」记录翻为已签。"""
+        ref = str(ref_id or '').strip()
+        if not ref:
+            return 0
+        updated = 0
+        now = self._clock()
+        with self.lock:
+            track = self._cx_track if platform == 'cx' else self._ykt_track
+            st = track.setdefault(ref, {
+                'done': False, 'attempts': 0, 'next_try': 0.0, 'notified_need': False,
+            })
+            was_done = bool(st.get('done'))
+            st['done'] = True
+            for ev in self._events:
+                if ev.get('platform') == platform and ev.get('refId') == ref and ev.get('status') == 'need_action':
+                    ev['status'] = 'signed'
+                    ev['detail'] = detail
+                    ev['time'] = _now_str(now)
+                    ev.pop('item', None)
+                    updated += 1
+            if count_signed and not was_done:
+                self._stats['signed'] += 1
+            self._recount_need_action_locked()
+        return updated
+
+    def sync_cx_signs(self, signs: list[dict]) -> None:
+        """扫描结果回来后，把已经签上或已从进行中列表消失的「需人工」记录同步消掉。"""
+        live_unsigned: set[str] = set()
+        for s in signs or []:
+            aid = str(s.get('activeId') or '')
+            if not aid:
+                continue
+            if s.get('signed') or self._cx_expired(s):
+                self.mark_resolved('cx', aid, detail='已签到（状态已同步）', count_signed=False)
+            else:
+                live_unsigned.add(aid)
+
+        with self.lock:
+            pending_ids = [
+                ev.get('refId') for ev in self._events
+                if ev.get('platform') == 'cx'
+                and ev.get('status') == 'need_action'
+                and ev.get('refId')
+                and ev.get('refId') not in live_unsigned
+            ]
+        if not pending_ids:
+            return
+        cx_state = self._get_cx()
+        signer = getattr(cx_state, 'signer', None)
+        api = getattr(signer, 'api', None)
+        for aid in set(pending_ids):
+            try:
+                attend = api.attend_info(aid) if api and hasattr(api, 'attend_info') else {}
+                st = int(attend.get('status') or 0)
+            except Exception:                            # noqa: BLE001
+                st = 0
+            if st != 0:
+                self.mark_resolved('cx', aid, detail='已完成签到（已同步）', count_signed=False)
+            else:
+                self.mark_resolved('cx', aid, detail='签到已结束', count_signed=False)
 
     # ------------------------------------------------------------ 配置与通知
 
@@ -228,8 +297,10 @@ class AutoSignEngine:
         return str((c.get('autoSign') or {}).get('webhookUrl') or '').strip()
 
     def _record(self, platform: str, status: str, name: str, detail: str,
-                trigger: str = '轮询', notify: bool = False) -> dict:
+                trigger: str = '轮询', notify: bool = False,
+                ref_id: str = '', item: dict | None = None) -> dict:
         now = self._clock()
+        ref = str(ref_id or '')
         with self.lock:
             self._event_seq += 1
             ev = {
@@ -241,14 +312,29 @@ class AutoSignEngine:
                 'name': name,
                 'detail': detail,
                 'trigger': trigger,
+                'refId': ref,
             }
+            if status == 'need_action' and isinstance(item, dict):
+                ev['item'] = {
+                    'activeId': str(item.get('activeId') or ref),
+                    'courseId': str(item.get('courseId') or ''),
+                    'classId': str(item.get('classId') or ''),
+                    'courseName': str(item.get('courseName') or ''),
+                    'name': str(item.get('name') or ''),
+                    'url': str(item.get('url') or ''),
+                    'signType': str(item.get('signType') or 'normal'),
+                    'needCaptcha': bool(item.get('needCaptcha')),
+                    'needFace': bool(item.get('needFace')),
+                    'needPhoto': bool(item.get('needPhoto')),
+                    'numberCount': int(item.get('numberCount') or 0),
+                    'missing': list(item.get('missing') or []),
+                }
             self._events.append(ev)
             if status == 'signed':
                 self._stats['signed'] += 1
-            elif status == 'need_action':
-                self._stats['needAction'] += 1
             elif status == 'failed':
                 self._stats['failed'] += 1
+            self._recount_need_action_locked()
 
         core.log(f'[自动签到][{platform}][{trigger}] {name}: {status} - {detail}')
 
@@ -396,13 +482,11 @@ class AutoSignEngine:
         label = (f"{item.get('courseName') or '学习通'} · {item.get('name') or '签到'}").strip(' ·')
 
         if item.get('signed'):
-            with self.lock:
-                self._cx_track[aid] = {'done': True, 'attempts': 0, 'next_try': 0.0}
+            self.mark_resolved('cx', aid, detail='已签到（状态已同步）', count_signed=False)
             return {'status': 'already', 'activeId': aid}
 
         if self._cx_expired(item):
-            with self.lock:
-                self._cx_track[aid] = {'done': True, 'attempts': 0, 'next_try': 0.0}
+            self.mark_resolved('cx', aid, detail='签到已结束', count_signed=False)
             return {'status': 'expired', 'activeId': aid}
 
         now = self._clock()
@@ -430,7 +514,8 @@ class AutoSignEngine:
                     tr['notified_need'] = True
                     should_notify = True
             if should_notify:
-                self._record('cx', 'need_action', label, why, trigger=trigger, notify=True)
+                self._record('cx', 'need_action', label, why, trigger=trigger,
+                             notify=True, ref_id=aid, item=item)
             return {'status': 'need_action', 'activeId': aid, 'detail': why}
 
         # 全自动类型（普通 / 已配坐标的位置签到，且无验证码）
@@ -442,10 +527,9 @@ class AutoSignEngine:
             res = {'ok': False, 'status': 'failed', 'detail': str(exc)[:120], 'needs': []}
 
         if res.get('ok'):
-            with self.lock:
-                self._cx_track[aid]['done'] = True
+            self.mark_resolved('cx', aid, detail=res.get('detail') or '签到成功', count_signed=False)
             self._record('cx', 'signed', label, res.get('detail') or '签到成功',
-                         trigger=trigger, notify=True)
+                         trigger=trigger, notify=True, ref_id=aid)
             return {'status': 'signed', 'activeId': aid, 'detail': res.get('detail') or ''}
 
         # 服务端动态要求验证码或额外输入：立即停止重试，通知人工处理（不绕过）
@@ -460,7 +544,11 @@ class AutoSignEngine:
                     tr['notified_need'] = True
                     should_notify = True
             if should_notify:
-                self._record('cx', 'need_action', label, why, trigger=trigger, notify=True)
+                item_snap = dict(item)
+                if '验证码' in needs:
+                    item_snap['needCaptcha'] = True
+                self._record('cx', 'need_action', label, why, trigger=trigger,
+                             notify=True, ref_id=aid, item=item_snap)
             return {'status': 'need_action', 'activeId': aid, 'detail': why}
 
         # 普通失败：退避重试
@@ -471,7 +559,8 @@ class AutoSignEngine:
             tr['next_try'] = now + RETRY_BACKOFF[idx]
             exhausted = tr['attempts'] >= MAX_ATTEMPTS
         detail = res.get('detail') or '签到失败'
-        self._record('cx', 'failed', label, detail, trigger=trigger, notify=exhausted)
+        self._record('cx', 'failed', label, detail, trigger=trigger,
+                     notify=exhausted, ref_id=aid)
         return {'status': 'failed', 'activeId': aid, 'detail': detail}
 
     # ------------------------------------------------------------ 轮询兜底
@@ -488,8 +577,10 @@ class AutoSignEngine:
         if not data or not data.get('ok'):
             return {'ok': False, 'error': (data or {}).get('error') or '扫描失败'}
 
+        signs_list = data.get('signs') or []
+        self.sync_cx_signs(signs_list)
         signed = need = failed = 0
-        for item in data.get('signs') or []:
+        for item in signs_list:
             r = self._handle_cx_item(item, trigger=trigger, allow_notify_need=True)
             if not r:
                 continue
@@ -530,8 +621,7 @@ class AutoSignEngine:
                 continue
             name = str(row.get('name') or row.get('courseName') or f'课堂 {lid}')
             if row.get('checkedAt') or row.get('signinStatus'):
-                with self.lock:
-                    self._ykt_track[lid] = {'done': True, 'attempts': 0, 'next_try': 0.0}
+                self.mark_resolved('ykt', lid, detail='已签到（状态已同步）', count_signed=False)
                 continue
 
             with self.lock:
@@ -576,8 +666,7 @@ class AutoSignEngine:
             detail = str(res.get('detail') or '')
 
             if st in ('checked', 'already'):
-                with self.lock:
-                    self._ykt_track[lid]['done'] = True
+                self.mark_resolved('ykt', lid, detail=detail or '签到成功', count_signed=False)
                 # 同步回写 YKT.lessons，前端红点立即更新
                 try:
                     checked_at = ykt_state.ykt.store.load_checked().get(lid, '')
@@ -589,7 +678,7 @@ class AutoSignEngine:
                             item['checkedAt'] = checked_at or _now_str(now)
                             item['signinStatus'] = 1
                 self._record('ykt', 'signed', name, detail or '签到成功',
-                             trigger=trigger, notify=True)
+                             trigger=trigger, notify=True, ref_id=lid)
                 signed += 1
             elif st == 'joined':
                 # 老师尚未发起签到，不计失败，等待下次复查
@@ -606,7 +695,7 @@ class AutoSignEngine:
                 if should_notify:
                     self._record('ykt', 'need_action', name,
                                  detail or '需要手动扫码或补充位置',
-                                 trigger=trigger, notify=True)
+                                 trigger=trigger, notify=True, ref_id=lid)
                 need += 1
             else:
                 with self.lock:
@@ -616,7 +705,7 @@ class AutoSignEngine:
                     tr['next_try'] = now + RETRY_BACKOFF[idx]
                     exhausted = tr['attempts'] >= MAX_ATTEMPTS
                 self._record('ykt', 'failed', name, detail or '签到失败',
-                             trigger=trigger, notify=exhausted)
+                             trigger=trigger, notify=exhausted, ref_id=lid)
                 failed += 1
 
         return {'ok': True, 'signed': signed, 'needAction': need, 'failed': failed}
