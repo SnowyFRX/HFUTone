@@ -77,11 +77,13 @@ def set_chat_signs(items: list[dict]) -> int:
 
 
 _DIST_RE = re.compile(r'距教师指定签到地点\s*([\d.]+)\s*米')
+_ERR_LOC_RE = re.compile(r'errorLocation\d*_([\d.]+)', re.IGNORECASE)
 
 
 def _parse_meters(msg: str) -> float | None:
-    """从「距教师指定签到地点885.0米，不在可签到范围内。」里取出距离。"""
-    m = _DIST_RE.search(str(msg or ''))
+    """从「距教师指定签到地点885.0米…」或「errorLocation2_885.0」里取出距离。"""
+    s = str(msg or '')
+    m = _DIST_RE.search(s) or _ERR_LOC_RE.search(s)
     if not m:
         return None
     try:
@@ -537,7 +539,8 @@ class CxSigner:
     def _locate_by_distance(self, cid: str, aid: str, url: str, addr: str,
                             lat: float, lng: float, d0: float,
                             validate: str = '', face_id: str = '',
-                            face_enc: str = '', offset: float = 0.01
+                            face_enc: str = '', offset: float = 0.01,
+                            submit_fn=None
                             ) -> tuple[float | None, float | None, int, bool]:
         """用多次提交的距离反推老师设的签到点。
 
@@ -548,13 +551,16 @@ class CxSigner:
         返回 (lat, lng, 探测次数, 探测过程中是否已直接签到成功)；解不出来时 lat 为 None。
         """
         api = self.api
+        if submit_fn is None:
+            def submit_fn(plat, plng):
+                return api.sign_location(cid, aid, addr, plat, plng, url,
+                                         validate=validate, face_id=face_id,
+                                         face_enc=face_enc)
         probes = [(lat + offset, lng), (lat, lng + offset)]
         obs = [(lat, lng, d0)]
         for plat, plng in probes:
             try:
-                pok, pmsg = api.sign_location(cid, aid, addr, plat, plng, url,
-                                              validate=validate, face_id=face_id,
-                                              face_enc=face_enc)
+                pok, pmsg = submit_fn(plat, plng)
             except Exception as exc:                       # noqa: BLE001
                 core.log(f'[学习通] 坐标探测失败：{exc}')
                 continue
@@ -572,6 +578,40 @@ class CxSigner:
             return None, None, len(obs), False
         core.log(f'[学习通] 三点定位结果：{pt[0]:.6f},{pt[1]:.6f}（残差已校验）')
         return pt[0], pt[1], len(obs), False
+
+    def _calibrate_by_distance(self, cid: str, aid: str, url: str, addr: str,
+                               la: float, ln: float, d0: float, item: dict,
+                               submit_fn, validate: str = '',
+                               face_id: str = '', face_enc: str = ''
+                               ) -> tuple[bool, str]:
+        """两轮三点定位反推老师设的签到点（位置/手势/签到码带范围限制均适用）。"""
+        total = 0
+        base_lat, base_lng, base_d = la, ln, d0
+        ok, msg = False, f'距离签到点 {d0:.1f} 米'
+        for rnd, off in ((1, 0.01), (2, 0.003)):
+            lat2, lng2, tries, hit_ok = self._locate_by_distance(
+                cid, aid, url, addr, base_lat, base_lng, base_d,
+                validate=validate, face_id=face_id, face_enc=face_enc,
+                offset=off, submit_fn=submit_fn)
+            total += tries
+            if lat2 is None:
+                break
+            base_lat, base_lng = lat2, lng2
+            self.default_location = {'address': addr, 'lat': lat2, 'lng': lng2}
+            item['_calibrated'] = {'lat': lat2, 'lng': lng2}
+            if hit_ok:
+                return True, f'签到成功（坐标探测直接命中，累计 {total} 次）'
+            ok2, msg2 = submit_fn(lat2, lng2)
+            core.log(f'[学习通] 第 {rnd} 轮定位 {lat2:.6f},{lng2:.6f} -> '
+                     f'{"成功" if ok2 else "仍失败"}（累计 {total} 次探测）')
+            if ok2 or '已签到' in str(msg2 or ''):
+                return True, msg2 or '签到成功'
+            d2 = _parse_meters(msg2)
+            msg = (msg2 or msg) + (f'（已校准 {total} 次）' if d2 is None else '')
+            if d2 is None or d2 <= 0:
+                break
+            base_d = d2
+        return ok, msg
 
     def _do_sign(self, item, st, aid, cid, url, pattern, code, enc,
                  address, lat, lng, validate, photo_path, with_face) -> dict:
@@ -632,62 +672,53 @@ class CxSigner:
                 if not pattern:
                     return {'ok': False, 'status': 'need', 'detail': '要手势',
                             'needs': ['手势']}
+                def _sub_pat(plat, plng):
+                    return api.sign_code(cid, aid, pattern, url, validate=validate,
+                                         address=addr or '校区', lat=plat, lng=plng)
                 ok, msg = api.sign_code(cid, aid, pattern, url, validate=validate,
                                         address=addr,
                                         lat=la if addr else None,
                                         lng=ln if addr else None)
+                if not ok and la is not None and ln is not None:
+                    d0 = _parse_meters(msg)
+                    if d0 is not None and d0 > 0:
+                        ok, msg = self._calibrate_by_distance(
+                            cid, aid, url, addr or '校区', la, ln, d0, item,
+                            submit_fn=_sub_pat, validate=validate)
             elif st == 'code':
                 if not code:
                     return {'ok': False, 'status': 'need', 'detail': '要签到码',
                             'needs': ['签到码']}
+                def _sub_code(plat, plng):
+                    return api.sign_code(cid, aid, code, url, validate=validate,
+                                         address=addr or '校区', lat=plat, lng=plng)
                 ok, msg = api.sign_code(cid, aid, code, url, validate=validate,
                                         address=addr,
                                         lat=la if addr else None,
                                         lng=ln if addr else None)
+                if not ok and la is not None and ln is not None:
+                    d0 = _parse_meters(msg)
+                    if d0 is not None and d0 > 0:
+                        ok, msg = self._calibrate_by_distance(
+                            cid, aid, url, addr or '校区', la, ln, d0, item,
+                            submit_fn=_sub_code, validate=validate)
             elif st == 'location':
                 if not addr or la is None or ln is None:
                     return {'ok': False, 'status': 'need',
                             'detail': '要位置', 'needs': ['位置']}
-                ok, msg = api.sign_location(cid, aid, addr, la, ln, url,
-                                            validate=validate, face_id=face_id,
-                                            face_enc=face_enc)
+                def _sub_loc(plat, plng):
+                    return api.sign_location(cid, aid, addr, plat, plng, url,
+                                             validate=validate, face_id=face_id,
+                                             face_enc=face_enc)
+                ok, msg = _sub_loc(la, ln)
                 # 失败且服务端给了距离：说明坐标只是不够准，用三次提交反推老师设的点。
                 if not ok:
                     d0 = _parse_meters(msg)
-                    if d0 is not None and d0 > 200:
-                        # 第一轮：0.01° 的三角形（约 1.1 km 边长），先落到百米级
-                        # 第二轮：以第一轮结果为基准、0.003° 的细三角形（约 330 m），
-                        #         把几何误差再压一个量级
-                        total = 0
-                        base_lat, base_lng, base_d = la, ln, d0
-                        for rnd, off in ((1, 0.01), (2, 0.003)):
-                            lat2, lng2, tries, hit_ok = self._locate_by_distance(
-                                cid, aid, url, addr, base_lat, base_lng, base_d,
-                                validate=validate, face_id=face_id, face_enc=face_enc,
-                                offset=off)
-                            total += tries
-                            if lat2 is None:
-                                break
-                            base_lat, base_lng = lat2, lng2
-                            self.default_location = {'address': addr,
-                                                     'lat': lat2, 'lng': lng2}
-                            item['_calibrated'] = {'lat': lat2, 'lng': lng2}
-                            if hit_ok:
-                                ok, msg = True, f'签到成功（坐标探测直接命中，累计 {total} 次）'
-                                break
-                            ok2, msg2 = api.sign_location(
-                                cid, aid, addr, lat2, lng2, url,
-                                validate=validate, face_id=face_id, face_enc=face_enc)
-                            core.log(f'[学习通] 第 {rnd} 轮定位 {lat2:.6f},{lng2:.6f} -> '
-                                     f'{"成功" if ok2 else "仍失败"}（累计 {total} 次探测）')
-                            if ok2 or '已签到' in str(msg2 or ''):
-                                ok, msg = True, msg2 or '签到成功'
-                                break
-                            d2 = _parse_meters(msg2)
-                            msg = (msg2 or msg) + (f'（已校准 {total} 次）' if d2 is None else '')
-                            if d2 is None or d2 <= 0:
-                                break
-                            base_d = d2
+                    if d0 is not None and d0 > 0:
+                        ok, msg = self._calibrate_by_distance(
+                            cid, aid, url, addr, la, ln, d0, item,
+                            submit_fn=_sub_loc, validate=validate,
+                            face_id=face_id, face_enc=face_enc)
             elif st == 'qrcode':
                 if not enc:
                     return {'ok': False, 'status': 'need', 'detail': '要扫二维码',
@@ -731,6 +762,13 @@ class CxSigner:
             if cal:
                 out['calibrated'] = cal
             return out
+        if 'errorlocation' in str(msg or '').lower():
+            if la is None or ln is None:
+                return {'ok': False, 'status': 'need',
+                        'detail': '此签到限制位置，需先填位置坐标', 'needs': ['位置']}
+            dm = _parse_meters(msg)
+            if dm is not None:
+                msg = f'位置不在签到范围内（距教师指定点 {dm:.1f} 米）'
         return {'ok': False, 'status': 'failed', 'detail': msg, 'needs': []}
 
     def _refresh_one(self, item: dict) -> None:
