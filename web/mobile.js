@@ -23,6 +23,9 @@
   var body = document.body;
   if (body) {
     body.classList.add('is-android');
+  // 手机上没有直播画面（见文件头说明），副标题别再把「直播课堂」挂在那儿
+  var sub = document.getElementById('brandSub');
+  if (sub) { sub.textContent = '雨课堂 · 学习通'; }
   // 设置里的坐标拾取器：桌面只给可复制的地址，安卓额外给一个能点的链接
   var urlRow = document.querySelector('.set-url-android');
   if (urlRow) { urlRow.hidden = false; }
