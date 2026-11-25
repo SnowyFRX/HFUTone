@@ -23,6 +23,57 @@ SRC_CFG = HERE / '.config'
 
 MPV_PKG = HERE / 'mpv' / 'mpv.exe.xz'
 MPV_DIR = DIST / 'mpv'
+VER_RC = HERE / 'build' / 'version_info.txt'
+
+
+def _stamp_version() -> None:
+    """按 build.gradle 的 versionName 与当天日期写版本资源。
+
+    exe 的版本资源是嵌进去的，不重写就一直停在上次手改的日期上（2026-11-26
+    之前停在 2026.11.21.1，属性页看着像没更新）。写到 build/ 下，仓库里的
+    version_info.txt 留作模板，不跟着每天变。
+    """
+    import datetime
+    import re
+    gradle = HERE / 'android' / 'app' / 'build.gradle'
+    try:
+        m = re.search(r"versionName\s+'([^']+)'", gradle.read_text('utf-8'))
+        product = m.group(1) if m else '0.0.0'
+    except OSError:
+        product = '0.0.0'
+    now = datetime.datetime.now()
+    quad = f'{now.year}, {now.month}, {now.day}, 1'
+    dotted = f'{now.year}.{now.month:02d}.{now.day:02d}.1'
+    VER_RC.parent.mkdir(parents=True, exist_ok=True)
+    VER_RC.write_text(f'''# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({quad}),
+    prodvers=({quad}),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '080404B0',
+        [StringStruct('CompanyName', 'HFUTone'),
+         StringStruct('FileDescription', 'HFUTone · 工大直播课堂与长江雨课堂'),
+         StringStruct('FileVersion', '{dotted}'),
+         StringStruct('InternalName', 'HFUTone'),
+         StringStruct('OriginalFilename', 'HFUTone.exe'),
+         StringStruct('ProductName', 'HFUTone'),
+         StringStruct('ProductVersion', '{product}')])
+    ]),
+    VarFileInfo([VarStruct('Translation', [2052, 1200])])
+  ]
+)
+''', 'utf-8')
+    print(f'[版本] {dotted}（ProductVersion {product}）')
 
 
 def _unpack_mpv() -> None:
@@ -85,6 +136,9 @@ def main() -> int:
         print(f'[备份] dist 没有可用 .config，沿用上次备份 {BACKUP}')
     else:
         print('[备份] 没有可用的 .config（首次运行会重建），继续')
+
+    # 1.5) 版本资源：exe 属性里的版本号跟构建日期走
+    _stamp_version()
 
     # 2) 打包
     cmd = [sys.executable, '-m', 'PyInstaller', 'HFUTone.spec', '--noconfirm']

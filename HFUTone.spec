@@ -67,7 +67,9 @@ exe = EXE(                     # noqa: F821
     console=False,             # 不弹黑控制台
     disable_windowed_traceback=False,
     icon=str(ROOT / 'assets' / 'hfutlive.ico'),
-    version=str(ROOT / 'version_info.txt'),
+    version=str((ROOT / 'build' / 'version_info.txt')
+                if (ROOT / 'build' / 'version_info.txt').is_file()
+                else (ROOT / 'version_info.txt')),
 )
 
 coll = COLLECT(                # noqa: F821
