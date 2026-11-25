@@ -242,16 +242,31 @@ class CxSigner:
                     'error': '没有取到课程（登录可能已失效）'}
 
         signs: list[dict] = []
-        for c in courses:
+
+        # 27 门课串行请求要 15~17 秒，手机上感觉像卡死（点什么都排不上队）。
+        # 这里改成并发取活动：urllib 是 IO 阻塞，多线程能真正并行；线程数压到 6，
+        # 免得把服务端打得太狠反过来更慢。任一课失败不影响其它课。
+        def _one(course: dict):
             try:
-                acts = self.api.activities(c['courseId'], c['classId'], c['cpi'])
+                return course, self.api.activities(course['courseId'],
+                                                   course['classId'],
+                                                   course['cpi'])
             except Exception as exc:                       # noqa: BLE001
-                core.log(f'[学习通] 取活动失败 {c.get("name")}: {exc}')
-                continue
-            for a in acts:
+                core.log(f'[学习通] 取活动失败 {course.get("name")}: {exc}')
+                return course, []
+
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                results = list(pool.map(_one, courses))
+        except ImportError:                                # 极老环境兜底
+            results = [_one(c) for c in courses]
+
+        for course, acts in results:
+            for a in acts or []:
                 if a['type'] not in SIGN_ACTIVE_TYPES or not a['status']:
                     continue
-                signs.append(self._describe(c, a))
+                signs.append(self._describe(course, a))
 
         # 群聊里的签到通知并进同一份列表：普通签到、群聊签到对用户是同一件事，
         # 分成两个列表只会让人不知道该点哪个。去重按 activeId。

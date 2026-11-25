@@ -303,15 +303,39 @@
     next();
   }
 
-  /* 自动刷新：每 10 秒扫一次（设置里可关）。页面不可见时跳过，省电。 */
+  /* 自动刷新。
+     踩过的坑：原来用 setInterval(…, 10000)，但一次扫描要 15~17 秒
+     （27 门课串行请求），于是扫描永远排不上间隙 —— 界面一直「正在处理」，
+     按钮一直灰，用户点什么都要排队等扫描让路。
+     改成「上一轮跑完再等」，并且间隔放到 60 秒；用户正在操作时直接跳过。 */
+  var AUTO_GAP_MS = 60000;
+
   function startAutoScan() {
-    if (AUTO.timer) { clearInterval(AUTO.timer); AUTO.timer = 0; }
-    AUTO.timer = setInterval(function () {
-      if (!S.loggedIn || S.busy) { return; }
-      if (document.hidden) { return; }
-      if (!S.cfg || S.cfg.autoScan === false) { return; }
-      doScan();
-    }, 10000);
+    if (AUTO.timer) { clearTimeout(AUTO.timer); AUTO.timer = 0; }
+    function tick() {
+      AUTO.timer = 0;
+      if (!S.loggedIn || S.busy || AUTO.running) { schedule(); return; }
+      if (document.hidden) { schedule(); return; }
+      if (!S.cfg || S.cfg.autoScan === false) { schedule(); return; }
+      doScan().then(schedule, schedule);
+    }
+    function schedule() {
+      if (AUTO.timer) { return; }
+      AUTO.timer = setTimeout(tick, AUTO_GAP_MS);
+    }
+    schedule();
+  }
+
+  /* 用户正在手动操作（签到/取验证码）时，把自动扫描按住，
+     免得抢同一条 HTTP 通道让人干等。 */
+  function pauseAuto() {
+    if (AUTO.timer) { clearTimeout(AUTO.timer); AUTO.timer = 0; }
+  }
+
+  function resumeAuto() {
+    if (!AUTO.timer && S.cfg && S.cfg.autoScan !== false) {
+      AUTO.timer = setTimeout(function () { startAutoScan(); }, 3000);
+    }
   }
 
   /* --------------------------------------------------------- 签到与补输入 */
@@ -368,6 +392,7 @@
   function capOpen(referer, onOk) {
     CAP.referer = referer || "https://mobilelearn.chaoxing.com/";
     CAP.onOk = onOk;
+    pauseAuto();          // 取图/验图期间别让自动刷新抢通道
     capShow();
     capLoad();
   }
@@ -482,6 +507,7 @@
   }
 
   function signOne(item, extra) {
+    pauseAuto();
     // 已知需要滑块验证码的项：先弹滑块，避免白提交一次换来「环境异常」
     if (item && item.needCaptcha && !(extra && extra.validate)) {
       capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (v) {
@@ -630,6 +656,7 @@
       el.addEventListener('click', function () {
         CAP.onOk = null;
         capHide();
+        resumeAuto();
       });
     }
     if ((el = $('cxCapSlice'))) {

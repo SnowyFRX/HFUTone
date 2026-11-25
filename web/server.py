@@ -197,6 +197,12 @@ def read_settings() -> dict:
             ec = cx.get('extraCourses')
             if isinstance(ec, list):
                 blob['cx']['extraCourses'] = _clean_extra_courses(ec)
+            # 这两个开关必须也读回来，否则保存进去的 false 在下次读取时
+            # 被忽略、退回默认的 true —— 表现就是「取消勾选后又被自动勾上」。
+            if isinstance(cx.get('autoScan'), bool):
+                blob['cx']['autoScan'] = cx['autoScan']
+            if isinstance(cx.get('autoSign'), bool):
+                blob['cx']['autoSign'] = cx['autoSign']
     return blob
 
 
@@ -285,13 +291,16 @@ def write_settings(patch: dict) -> dict:
                 cur['lat'] = _clamp(loc.get('lat'), -90, 90)
             if loc.get('lng') is not None:
                 cur['lng'] = _clamp(loc.get('lng'), -180, 180)
-            ec = cx.get('extraCourses')
-            if isinstance(ec, list):
-                cfg['cx']['extraCourses'] = _clean_extra_courses(ec)
-            if isinstance(cx.get('autoScan'), bool):
-                cfg['cx']['autoScan'] = cx['autoScan']
-            if isinstance(cx.get('autoSign'), bool):
-                cfg['cx']['autoSign'] = cx['autoSign']
+        # 下面这几项与 location 无关，必须在外层判断里 —— 之前误缩进到
+        # `if isinstance(loc, dict)` 内部，导致只有同时改坐标时才生效：
+        # 单独关「自动刷新」、单独加课都会被静默丢掉。
+        ec = cx.get('extraCourses')
+        if isinstance(ec, list):
+            cfg['cx']['extraCourses'] = _clean_extra_courses(ec)
+        if isinstance(cx.get('autoScan'), bool):
+            cfg['cx']['autoScan'] = cx['autoScan']
+        if isinstance(cx.get('autoSign'), bool):
+            cfg['cx']['autoSign'] = cx['autoSign']
     try:
         CRED_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
