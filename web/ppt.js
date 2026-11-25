@@ -131,14 +131,36 @@
     // 学习通位置坐标：三个字段一起存，输入停 500ms 再写盘，
     // 免得每敲一个数字就打一次请求
     var locTimer = null;
+
+    /* 坐标防呆。真实踩过的坑：纬度和经度被填成同一个值（31.847218 / 31.847218），
+       签到提交后才从上距里看到「距教师指定签到地点 7820504.0 米」——那是 7800 公里。
+       填错时宁可当场拒绝写盘，也别让它悄悄生效。 */
+    function checkLatLng(lat, lng) {
+      if (!isFinite(lat) || !isFinite(lng)) { return '经纬度都要填数字'; }
+      if (lat < -90 || lat > 90) { return '纬度要在 -90 ~ 90 之间'; }
+      if (lng < -180 || lng > 180) { return '经度要在 -180 ~ 180 之间'; }
+      if (Math.abs(lat - lng) < 1e-9) { return '纬度和经度填成同一个值了，检查一下'; }
+      // 国内常见范围：纬度 3~54、经度 73~136。两个都落在「像纬度」的区间 = 大概率填反
+      if (lat > 3 && lat < 54 && lng > 3 && lng < 73) {
+        return '经度看起来不像国内坐标（应在 73~136），是不是填反了';
+      }
+      return '';
+    }
+
     function saveLoc() {
       var addr = $('setCxAddress') ? $('setCxAddress').value.trim() : '';
       // 统一到 6 位小数（1e-6 度约 0.1 米，再多一位没有意义）
       var lat = $('setCxLat') ? parseFloat(Number($('setCxLat').value).toFixed(6)) : NaN;
       var lng = $('setCxLng') ? parseFloat(Number($('setCxLng').value).toFixed(6)) : NaN;
+      var why = checkLatLng(lat, lng);
+      if (why) {
+        var msg = $('settingsMsg');
+        if (msg) { msg.textContent = why + '（没有保存）'; msg.className = 'err-line is-err'; }
+        return;
+      }
       var patch = { cx: { location: { address: addr } } };
-      if (!isNaN(lat)) { patch.cx.location.lat = lat; }
-      if (!isNaN(lng)) { patch.cx.location.lng = lng; }
+      patch.cx.location.lat = lat;
+      patch.cx.location.lng = lng;
       saveSettings(patch, '位置坐标已保存');
     }
     function queueSaveLoc() {

@@ -22,6 +22,8 @@ cxapi 只管「怎么发一个请求」，这里管「什么时候发、发哪�
 """
 from __future__ import annotations
 
+import math
+import re
 import threading
 import time
 
@@ -72,6 +74,89 @@ def set_chat_signs(items: list[dict]) -> int:
         added += 1
     del _CHAT_SIGNS[:-200]
     return added
+
+
+_DIST_RE = re.compile(r'距教师指定签到地点\s*([\d.]+)\s*米')
+
+
+def _parse_meters(msg: str) -> float | None:
+    """从「距教师指定签到地点885.0米，不在可签到范围内。」里取出距离。"""
+    m = _DIST_RE.search(str(msg or ''))
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def _det3(m: list[list[float]]) -> float:
+    return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+
+
+def _solve3(rows: list[list[float]], rhs: list[float]) -> tuple[float, float, float] | None:
+    """三元一次方程（Cramer）。不用 numpy —— 安卓 Chaquopy 里没有它。"""
+    if len(rows) != 3 or len(rhs) != 3:
+        return None
+    det = _det3(rows)
+    if abs(det) < 1e-9:
+        return None
+    out = []
+    for col in range(3):
+        m = [list(r) for r in rows]
+        for i in range(3):
+            m[i][col] = rhs[i]
+        out.append(_det3(m) / det)
+    return out[0], out[1], out[2]
+
+
+def _solve_point(obs: list[tuple[float, float, float]]) -> tuple[float, float] | None:
+    """三点定位：给定 (lat, lng, 距离米)，求目标点。
+
+    局部平面近似（校园尺度够用）：X = lng*K*cos(lat0)、Y = lat*K，K=111320。
+    每次观测给出 d^2 = (X-Xi)^2 + (Y-Yi)^2，展开后对 (X, Y, X^2+Y^2) 是线性的：
+
+        -2*Xi*u - 2*Yi*v + w = d^2 - Xi^2 - Yi^2 ,  u=X, v=Y, w=X^2+Y^2
+
+    三次观测解三元一次方程即可。返回 (lat, lng)，失败返回 None。
+    """
+    if len(obs) < 3:
+        return None
+    K = 111320.0
+    lat0 = obs[0][0]
+    coslat = math.cos(math.radians(lat0)) or 1e-6
+
+    import itertools
+    best = None
+    # 取任意三点组合，解出候选点后选残差最小的一组（有噪声时更稳）
+    for trio in itertools.combinations(obs, 3):
+        rows, rhs = [], []
+        for la, ln, d in trio:
+            Xi = ln * K * coslat
+            Yi = la * K
+            rows.append([-2 * Xi, -2 * Yi, 1.0])
+            rhs.append(d * d - Xi * Xi - Yi * Yi)
+        sol = _solve3(rows, rhs)
+        if sol is None:
+            continue
+        X, Y = sol[0], sol[1]
+        la = Y / K
+        ln = X / (K * coslat)
+        if not (-90 <= la <= 90 and -180 <= ln <= 180):
+            continue
+        # 残差检验：解出来的点必须能同时解释三次观测
+        resid = 0.0
+        for ola, oln, d in obs:
+            dx = (ln - oln) * K * coslat
+            dy = (la - ola) * K
+            resid += abs(math.hypot(dx, dy) - d)
+        if best is None or resid < best[0]:
+            best = (resid, la, ln)
+    if not best:
+        return None
+    return best[1], best[2]
 
 
 class CxSigner:
@@ -402,6 +487,41 @@ class CxSigner:
             with self._lock:
                 self._signing.discard(aid)
 
+    def _locate_by_distance(self, cid: str, aid: str, url: str, addr: str,
+                            lat: float, lng: float, d0: float,
+                            validate: str = '', face_id: str = '',
+                            face_enc: str = '') -> tuple[float | None, float | None, int]:
+        """用多次提交的距离反推老师设的签到点。
+
+        第一次（调用方已经做过）得到 d0。再补两个探测点构成三角形，
+        三次观测解出目标点；窗口足够长时这套比"让用户自己抠经纬度"可靠得多。
+        探测点的偏移取 0.01 度（约 1.1 km），保证三个圆不退化。
+
+        返回 (lat, lng, 探测次数)；解不出来时 lat 为 None。
+        """
+        api = self.api
+        probes = [(lat + 0.01, lng), (lat, lng + 0.01)]
+        obs = [(lat, lng, d0)]
+        for plat, plng in probes:
+            try:
+                _ok, pmsg = api.sign_location(cid, aid, addr, plat, plng, url,
+                                              validate=validate, face_id=face_id,
+                                              face_enc=face_enc)
+            except Exception as exc:                       # noqa: BLE001
+                core.log(f'[学习通] 坐标探测失败：{exc}')
+                continue
+            d = _parse_meters(pmsg)
+            if d is None:
+                # 探测点直接成功（说明目标点就在附近），把这点当成结果
+                return plat, plng, len(obs) + 1
+            obs.append((plat, plng, d))
+            core.log(f'[学习通] 坐标探测 {len(obs)}：距离 {d:.1f} 米')
+        pt = _solve_point(obs)
+        if not pt:
+            return None, None, len(obs)
+        core.log(f'[学习通] 三点定位结果：{pt[0]:.6f},{pt[1]:.6f}（残差已校验）')
+        return pt[0], pt[1], len(obs)
+
     def _do_sign(self, item, st, aid, cid, url, pattern, code, enc,
                  address, lat, lng, validate, photo_path, with_face) -> dict:
         api = self.api
@@ -460,6 +580,23 @@ class CxSigner:
                 ok, msg = api.sign_location(cid, aid, addr, la, ln, url,
                                             validate=validate, face_id=face_id,
                                             face_enc=face_enc)
+                # 失败且服务端给了距离：说明坐标只是不够准，用三次提交反推老师设的点。
+                if not ok:
+                    d0 = _parse_meters(msg)
+                    if d0 is not None and d0 > 200:
+                        lat2, lng2, tries = self._locate_by_distance(
+                            cid, aid, url, addr, la, ln, d0,
+                            validate=validate, face_id=face_id, face_enc=face_enc)
+                        if lat2 is not None:
+                            ok2, msg2 = api.sign_location(
+                                cid, aid, addr, lat2, lng2, url,
+                                validate=validate, face_id=face_id, face_enc=face_enc)
+                            core.log(f'[学习通] 定位后重交：{"成功" if ok2 else "仍失败"}'
+                                     f'（{tries} 次探测）')
+                            if ok2:
+                                ok, msg = True, msg2
+                            else:
+                                msg = (msg2 or msg) + f'（已用 {tries} 次探测校准坐标）'
             elif st == 'qrcode':
                 if not enc:
                     return {'ok': False, 'status': 'need', 'detail': '要扫二维码',

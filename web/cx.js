@@ -399,7 +399,13 @@
         return;
       }
       paintState();
-      toast((d && d.detail) || (d && d.error) || '签到失败', 'warn');
+      var why = (d && d.detail) || (d && d.error) || '签到失败';
+      // 「距教师指定签到地点 7820504.0 米」这种一眼就是坐标填错了，别只甩原文
+      var m = /距教师指定签到地点\s*([\d.]+)\s*米/.exec(why);
+      if (m && parseFloat(m[1]) > 50000) {
+        why += '。这个距离明显不对，先去设置里检查位置签到坐标（经纬度别填成同一个）';
+      }
+      toast(why, 'warn');
     });
   }
 
