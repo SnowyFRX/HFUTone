@@ -206,11 +206,37 @@ def im_session() -> dict:
     环信域名必须是 VIP6 的 a1-vip6.easecdn.com —— 老域名下任何用户名都
     返回 user not found，容易误判成账号问题。
     """
-    im = (CX.signer.api.store.get_user() or {}).get('imAccount') or {}
+    store = CX.signer.api.store
+    user_obj = store.get_user() or {}
+    im = user_obj.get('imAccount') or {}
     user = str(im.get('userName') or '')
     pwd = str(im.get('password') or '')
+
+    # 老版本登录过的 store 里没有 imAccount 字段（那时候还没解析它）。
+    # 光提示"重新登录"没用——用户重登后如果 refresh 失败，store 还是旧的。
+    # 这里现场补一次：refresh_user 会重新拉用户信息、解析 accountInfo.imAccount 并写盘。
     if not user or not pwd:
-        return {'ok': False, 'error': '没有 IM 账号，重新登录一次学习通'}
+        try:
+            ok, why = CX.signer.api.refresh_user()
+            yktcore.log(f'[群聊] 现场补 IM 账号：ok={ok} {why}')
+        except Exception as e:                           # noqa: BLE001
+            yktcore.log(f'[群聊] 现场补 IM 账号失败：{e}')
+        user_obj = store.get_user() or {}
+        im = user_obj.get('imAccount') or {}
+        user = str(im.get('userName') or '')
+        pwd = str(im.get('password') or '')
+
+    if not user or not pwd:
+        # 把诊断信息带回前端：有 cookie 但服务端没给 accountInfo，和根本没登录是两回事
+        diag = {
+            'hasCookie': bool(store.get_cookie()),
+            'userKeys': sorted(user_obj.keys()),
+            'imKeys': sorted(im.keys()) if isinstance(im, dict) else [],
+        }
+        yktcore.log(f'[群聊] 仍然没有 IM 账号：{diag}')
+        return {'ok': False, 'error': '服务端没给 IM 账号（cookie '
+                + ('在' if diag['hasCookie'] else '不在') + '，user 字段 '
+                + ','.join(diag['userKeys']) + '）', 'diag': diag}
     try:
         tok, err = cxchat.login(user, pwd)
     except Exception as e:                               # noqa: BLE001

@@ -303,7 +303,7 @@
     next();
   }
 
-  /* 自动刷新：每 60 秒扫一次（设置里可关）。页面不可见时跳过，省电。 */
+  /* 自动刷新：每 10 秒扫一次（设置里可关）。页面不可见时跳过，省电。 */
   function startAutoScan() {
     if (AUTO.timer) { clearInterval(AUTO.timer); AUTO.timer = 0; }
     AUTO.timer = setInterval(function () {
@@ -311,7 +311,7 @@
       if (document.hidden) { return; }
       if (!S.cfg || S.cfg.autoScan === false) { return; }
       doScan();
-    }, 60000);
+    }, 10000);
   }
 
   /* --------------------------------------------------------- 签到与补输入 */
