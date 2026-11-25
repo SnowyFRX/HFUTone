@@ -633,19 +633,50 @@
     }
   }
 
+  function mergeExtra(base, patch) {
+    var out = {};
+    Object.keys(base || {}).forEach(function (k) {
+      if (base[k] !== undefined && base[k] !== '') { out[k] = base[k]; }
+    });
+    Object.keys(patch || {}).forEach(function (k) {
+      if (patch[k] !== undefined) { out[k] = patch[k]; }
+    });
+    return out;
+  }
+
   function signOne(item, extra) {
     pauseAuto();
-    // 已知需要滑块验证码的项：先弹滑块，避免白提交一次换来「环境异常」
-    if (item && item.needCaptcha && !(extra && extra.validate)) {
-      capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (v) {
-        signOne(item, { validate: v, enc: (extra && extra.enc) || '' });
+    var ex = extra || {};
+    // 手势/签到码如果同时带验证码：先让用户填手势/签到码，再弹滑块，
+    // 一来避免填码期间 validate 过期，二来通过 mergeExtra 保留已填参数不再死循环。
+    if (item && item.signType === 'pattern' && !ex.pattern) {
+      paintState();
+      askInput('手势', '按九宫格顺序填数字，左上角是 1，右下角是 9。', '例如 12369', function (v) {
+        signOne(item, mergeExtra(ex, { pattern: v }));
       });
+      return Promise.resolve({ ok: false, status: 'need' });
+    }
+    if (item && item.signType === 'code' && !ex.code) {
+      paintState();
+      var n0 = item.numberCount || 0;
+      askInput('签到码', n0 ? ('老师给的是 ' + n0 + ' 位数字。') : '', '签到码', function (v) {
+        signOne(item, mergeExtra(ex, { code: v }));
+      });
+      return Promise.resolve({ ok: false, status: 'need' });
+    }
+    // 已知需要滑块验证码的项：先弹滑块，避免白提交一次换来「环境异常」
+    if (item && item.needCaptcha && !ex.validate) {
+      capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (v) {
+        signOne(item, mergeExtra(ex, { validate: v }));
+      }, !!ex._manualCap);
       return Promise.resolve({ ok: false, status: 'need' });
     }
     S.busy = true;
     paintState();
     var payload = { item: item };
-    Object.keys(extra || {}).forEach(function (k) { payload[k] = extra[k]; });
+    Object.keys(ex).forEach(function (k) {
+      if (k !== '_manualCap') { payload[k] = ex[k]; }
+    });
     return api('/api/cx/sign', payload).then(function (d) {
       S.busy = false;
       if (d && d.ok) {
@@ -653,12 +684,12 @@
         if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
         return doScan();
       }
-      // 缺东西：按 missing 弹对应输入框，填完再签一次
+      // 缺东西：按 missing 弹对应输入框，填完再签一次（保留已有 extra）
       var needs = (d && d.needs) || [];
       if (needs.indexOf('手势') >= 0) {
         paintState();
         askInput('手势', '按九宫格顺序填数字，左上角是 1，右下角是 9。', '例如 12369', function (v) {
-          signOne(item, { pattern: v });
+          signOne(item, mergeExtra(ex, { pattern: v }));
         });
         return;
       }
@@ -666,7 +697,7 @@
         paintState();
         var n = item.numberCount || 0;
         askInput('签到码', n ? ('老师给的是 ' + n + ' 位数字。') : '', '签到码', function (v) {
-          signOne(item, { code: v });
+          signOne(item, mergeExtra(ex, { code: v }));
         });
         return;
       }
@@ -683,7 +714,7 @@
             if (/^https?:\/\//i.test(v)) {
               api('/api/cx/qr_parse', { text: v }).then(function (p) {
                 if (p && p.ok && p.data) {
-                  signOne(item, { enc: p.data.enc, code: p.data.code || '' });
+                  signOne(item, mergeExtra(ex, { enc: p.data.enc, code: p.data.code || '' }));
                 } else {
                   toast((p && p.error) || '二维码解析失败', 'warn');
                 }
@@ -696,7 +727,7 @@
             api('/api/cx/qr_image', { image: imageDataUrl }).then(function (p) {
               if (p && p.ok && p.data) {
                 toast('已从图片里读到签到码', 'ok');
-                signOne(item, { enc: p.data.enc, code: p.data.code || '' });
+                signOne(item, mergeExtra(ex, { enc: p.data.enc, code: p.data.code || '' }));
               } else {
                 toast((p && p.error) || '图里没找到学习通签到码', 'warn');
               }
@@ -721,8 +752,12 @@
         }
         // 学习通的验证码是滑块，不是手填字符串：取图 → 拖动 → 换 validate → 重交
         capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (validate) {
-          signOne(item, { validate: validate, enc: (d && d.enc2) || '',
-                          lat: item.lat, lng: item.lng });
+          signOne(item, mergeExtra(ex, {
+            validate: validate,
+            enc: (d && d.enc2) || ex.enc || '',
+            lat: item.lat,
+            lng: item.lng
+          }));
         });
         return;
       }
@@ -732,11 +767,11 @@
           '地址,纬度,经度', function (v) {
             var parts = v.split(',');
             if (parts.length < 3) { toast('格式不对', 'warn'); return; }
-            signOne(item, {
+            signOne(item, mergeExtra(ex, {
               address: parts[0].trim(),
               lat: parseFloat(parts[1]),
               lng: parseFloat(parts[2])
-            });
+            }));
           });
         return;
       }
@@ -876,14 +911,8 @@
       toast('未找到该签到活动，先点「刷新签到」试试', 'warn');
       return;
     }
-    // 人工从守护卡片点进来：允许走完整人工验证/补输入流程
-    if (target.needCaptcha) {
-      capOpen(target.url || 'https://mobilelearn.chaoxing.com/', function (v) {
-        signOne(target, { validate: v });
-      }, true);
-      return;
-    }
-    signOne(target);
+    // 人工从守护卡片点进来：走统一 signOne（若同时要手势/签到码+验证码，先填码再人工滑块）
+    signOne(target, { _manualCap: true });
   }
 
   window.HFUTCx = {
