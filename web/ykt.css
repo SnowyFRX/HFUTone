@@ -1310,6 +1310,17 @@ body.is-side-drag .side > .side-shell { transition: none; }
 /* ---------------------------------------------------- 学习通签到一栏
    和雨课堂共用 .ykt-panel / .ykt-row 那一套骨架，这里只补它没有的：
    活动类型小标签、登录表单。 */
+/* 群聊连接状态：一行小字。安卓看不到 console，这行就是排除故障的唯一线索 */
+.cx-im-state {
+  margin: 0 0 var(--s2);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.cx-im-state.is-bad { color: #b23c3c; }
+
 .cx-tag {
   display: inline-block;
   margin-left: 6px;

@@ -51,6 +51,11 @@
       if (el) { el.checked = (m === mode); }
     });
 
+    // 学习通签到自动化
+    var cxcfg = (s.cx || {});
+    if ($('setCxAutoScan')) { $('setCxAutoScan').checked = cxcfg.autoScan !== false; }
+    if ($('setCxAutoSign')) { $('setCxAutoSign').checked = !!cxcfg.autoSign; }
+
     // 学习通位置签到的默认坐标
     var loc = ((s.cx || {}).location || {});
     if ($('setCxAddress')) { $('setCxAddress').value = loc.address || ''; }
@@ -73,6 +78,7 @@
     return api('/api/settings', patch).then(function (d) {
       if (d && d.ok) {
         fillSettings(d.settings);
+        if (window.cxApplySettings) { window.cxApplySettings(d.settings); }
         $('settingsMsg').textContent = note || '';
         setTimeout(function () { $('settingsMsg').textContent = ''; }, 1600);
       } else {
@@ -127,6 +133,19 @@
         saveSettings({ ykt: { signMode: m } }, '雨课堂签到：' + label);
       });
     });
+
+    if ($('setCxAutoScan')) {
+      $('setCxAutoScan').addEventListener('change', function () {
+        saveSettings({ cx: { autoScan: this.checked } },
+          this.checked ? '已开启自动刷新签到' : '已关闭自动刷新签到');
+      });
+    }
+    if ($('setCxAutoSign')) {
+      $('setCxAutoSign').addEventListener('change', function () {
+        saveSettings({ cx: { autoSign: this.checked } },
+          this.checked ? '已开启自动签到（刷新出来立刻提交）' : '已关闭自动签到');
+      });
+    }
 
     // 学习通位置坐标：三个字段一起存，输入停 500ms 再写盘，
     // 免得每敲一个数字就打一次请求

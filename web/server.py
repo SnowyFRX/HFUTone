@@ -109,7 +109,11 @@ DEFAULT_SETTINGS = {
     # 所以 App 身份就是主形态，"先扫码再 App 头对照"除了多一次失败请求没意义。
     'ykt': {'signMode': 'app'},
     'cx': {'location': {'address': '', 'lat': 0.0, 'lng': 0.0},
-            'extraCourses': []},
+            'extraCourses': [],
+            # 自动刷新签到信息：程序开着时定时扫一遍（两端都支持）
+            'autoScan': True,
+            # 自动提交签到：只对桌面版有效，默认关（安卓不做，见 README）
+            'autoSign': False},
 }
 
 YKT_SIGN_MODES = ('app', 'scan', 'both')
@@ -258,6 +262,10 @@ def write_settings(patch: dict) -> dict:
             ec = cx.get('extraCourses')
             if isinstance(ec, list):
                 cfg['cx']['extraCourses'] = _clean_extra_courses(ec)
+            if isinstance(cx.get('autoScan'), bool):
+                cfg['cx']['autoScan'] = cx['autoScan']
+            if isinstance(cx.get('autoSign'), bool):
+                cfg['cx']['autoSign'] = cx['autoSign']
     try:
         CRED_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')

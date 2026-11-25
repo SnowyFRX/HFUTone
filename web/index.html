@@ -44,8 +44,8 @@
 })();
 </script>
 <link rel="stylesheet" href="app.css?v=2026.11.25.7">
-<link rel="stylesheet" href="ykt.css?v=2026.11.25.11">
-<link rel="stylesheet" href="mobile.css?v=2026.11.25.7">
+<link rel="stylesheet" href="ykt.css?v=2026.11.25.14">
+<link rel="stylesheet" href="mobile.css?v=2026.11.25.14">
 </head>
 <body>
 
@@ -197,6 +197,8 @@
               <button id="cxScanBtn" type="button">↻ 刷新签到</button>
             </div>
           </div>
+
+          <p class="cx-im-state" id="cxImState" role="status">群聊通知：未连接</p>
 
           <div class="ykt-list" id="cxSigns" aria-label="进行中的签到">
             <!-- 行由 cx.js 注入 -->
@@ -401,6 +403,18 @@
       </div>
 
       <div class="set-group">
+        <p class="set-title">学习通签到自动化</p>
+        <label class="set-row">
+          <input type="checkbox" id="setCxAutoScan" checked>
+          <span><b>自动刷新签到</b><em>程序开着时每 60 秒扫一次，红点自己出来</em></span>
+        </label>
+        <label class="set-row set-desktop-only">
+          <input type="checkbox" id="setCxAutoSign">
+          <span><b>自动签到</b><em>刷新出来能全自动的那种，立刻提交。默认关</em></span>
+        </label>
+      </div>
+
+      <div class="set-group">
         <p class="set-title">学习通位置签到坐标</p>
         <p class="set-hint">
           打开<b>腾讯坐标拾取器</b>点一下地图复制经纬度，保留到小数点后 6 位。
@@ -466,9 +480,9 @@
 <script src="ascii-sharks.bundle.js?v=2026.11.16.7"></script>
 <script src="app.js?v=2026.11.25.1"></script>
 <script src="ykt.js?v=2026.11.25.5"></script>
-<script src="cx.js?v=2026.11.25.13"></script>
-<script src="im.js?v=2026.11.25.6"></script>
-<script src="ppt.js?v=2026.11.25.13"></script>
+<script src="cx.js?v=2026.11.25.14"></script>
+<script src="im.js?v=2026.11.25.14"></script>
+<script src="ppt.js?v=2026.11.25.14"></script>
 <script>
 /* HTML 与业务脚本版本不一致时只重载一次；NoCache + no-store 保证拿到新资源。 */
 (function () {

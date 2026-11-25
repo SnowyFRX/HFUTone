@@ -490,7 +490,8 @@ class CxSigner:
     def _locate_by_distance(self, cid: str, aid: str, url: str, addr: str,
                             lat: float, lng: float, d0: float,
                             validate: str = '', face_id: str = '',
-                            face_enc: str = '') -> tuple[float | None, float | None, int]:
+                            face_enc: str = '', offset: float = 0.01
+                            ) -> tuple[float | None, float | None, int]:
         """用多次提交的距离反推老师设的签到点。
 
         第一次（调用方已经做过）得到 d0。再补两个探测点构成三角形，
@@ -500,7 +501,7 @@ class CxSigner:
         返回 (lat, lng, 探测次数)；解不出来时 lat 为 None。
         """
         api = self.api
-        probes = [(lat + 0.01, lng), (lat, lng + 0.01)]
+        probes = [(lat + offset, lng), (lat, lng + offset)]
         obs = [(lat, lng, d0)]
         for plat, plng in probes:
             try:
@@ -584,19 +585,33 @@ class CxSigner:
                 if not ok:
                     d0 = _parse_meters(msg)
                     if d0 is not None and d0 > 200:
-                        lat2, lng2, tries = self._locate_by_distance(
-                            cid, aid, url, addr, la, ln, d0,
-                            validate=validate, face_id=face_id, face_enc=face_enc)
-                        if lat2 is not None:
+                        # 第一轮：0.01° 的三角形（约 1.1 km 边长），先落到百米级
+                        # 第二轮：以第一轮结果为基准、0.003° 的细三角形（约 330 m），
+                        #         把几何误差再压一个量级
+                        total = 0
+                        base_lat, base_lng, base_d = la, ln, d0
+                        for rnd, off in ((1, 0.01), (2, 0.003)):
+                            lat2, lng2, tries = self._locate_by_distance(
+                                cid, aid, url, addr, base_lat, base_lng, base_d,
+                                validate=validate, face_id=face_id, face_enc=face_enc,
+                                offset=off)
+                            total += tries
+                            if lat2 is None:
+                                break
+                            base_lat, base_lng = lat2, lng2
                             ok2, msg2 = api.sign_location(
                                 cid, aid, addr, lat2, lng2, url,
                                 validate=validate, face_id=face_id, face_enc=face_enc)
-                            core.log(f'[学习通] 定位后重交：{"成功" if ok2 else "仍失败"}'
-                                     f'（{tries} 次探测）')
+                            core.log(f'[学习通] 第 {rnd} 轮定位 {lat2:.6f},{lng2:.6f} -> '
+                                     f'{"成功" if ok2 else "仍失败"}（累计 {total} 次探测）')
                             if ok2:
                                 ok, msg = True, msg2
-                            else:
-                                msg = (msg2 or msg) + f'（已用 {tries} 次探测校准坐标）'
+                                break
+                            d2 = _parse_meters(msg2)
+                            msg = (msg2 or msg) + (f'（已校准 {total} 次）' if d2 is None else '')
+                            if d2 is None or d2 <= 0:
+                                break
+                            base_d = d2
             elif st == 'qrcode':
                 if not enc:
                     return {'ok': False, 'status': 'need', 'detail': '要扫二维码',

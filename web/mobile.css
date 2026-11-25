@@ -420,3 +420,6 @@ body.is-android .set-live-only {
   .sheet h2 { font-size: 18px; }
   .sheet p.lead { font-size: 12.5px; }
 }
+
+/* 自动签到只在桌面版实现（安卓没有常驻后台与前台服务那套），手机上藏掉这一项 */
+body.is-android .set-desktop-only { display: none; }

@@ -18,6 +18,14 @@
 
   function log(s) {
     try { console.log('[IM] ' + s); } catch (e) { /* 忽略 */ }
+    // 安卓上看不到 console，所以把状态写到面板上一行，出问题截图就能定位
+    try {
+      var el = document.getElementById('cxImState');
+      if (el) {
+        el.textContent = '群聊通知：' + s;
+        el.className = 'cx-im-state' + (/失败|没拿到|出错/.test(s) ? ' is-bad' : '');
+      }
+    } catch (e) { /* 忽略 */ }
   }
 
   function ensureSdk(cb) {
@@ -110,13 +118,15 @@
     if (CORE.tried) { return; }
     CORE.tried = true;
     ensureSdk(function (ok) {
-      if (!ok) { log('SDK 加载失败，群聊签到不可用'); return; }
+      if (!ok) { log('SDK 加载失败（/im/Easemob.js 没取到）'); return; }
       var W = window.websdk;
       var NS = W.default || W;
       if (!NS || typeof NS.connection !== 'function') { log('SDK 形态不认识'); return; }
 
+      log('SDK 已加载，正在取 IM 会话…');
       fetch('/api/cx/im/session').then(function (r) { return r.json(); }).then(function (d) {
-        if (!d || !d.ok) { log('没拿到 IM 会话：' + ((d && d.error) || '')); return; }
+        if (!d || !d.ok) { log('没拿到 IM 会话：' + ((d && d.error) || '未知')); return; }
+        log('拿到会话，正在连接（' + (d.groups || []).length + ' 个群）');
 
         W.config = {
           xmppURL: 'https://im-api-vip6-v2.easecdn.com/ws',
@@ -155,12 +165,15 @@
         CORE.conn.listen({
           onOpened: function () {
             CORE.ready = true;
-            log('已连接');
+            log('已连接，开始拉群消息');
             pullRoaming(d.groups || []);
           },
           onClosed: function () { CORE.ready = false; },
           onOffline: function () { CORE.ready = false; },
-          onError: function (e) { log('错误 ' + JSON.stringify(e).slice(0, 120)); },
+          onError: function (e) {
+            CORE.error = JSON.stringify(e || {}).slice(0, 120);
+            log('连接出错：' + CORE.error);
+          },
           onTextMessage: function (m) {
             var a = pickActivity(m);
             if (!a) { return; }
@@ -176,7 +189,7 @@
           appKey: W.config.appkey
         });
         log('正在连接 uid=' + String(d.uid).slice(0, 3) + '***');
-      }).catch(function (e) { log('取会话失败：' + e); });
+      }).catch(function (e) { log('取会话请求失败：' + e); });
     });
   }
 
@@ -187,6 +200,10 @@
     // 兜底：登录成功后第一次刷新签到也连上
     var btn = document.getElementById('cxScanBtn');
     if (btn) { btn.addEventListener('click', function () { connect(); }); }
+    ['tabCx', 'btnCx'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.addEventListener('click', function () { connect(); }); }
+    });
   });
 
   window.HFUToneIM = { connect: connect, state: CORE };

@@ -8,6 +8,8 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  var AUTO = { timer: 0, lastSign: 0, running: false };
+
   var S = {
     loggedIn: false,
     profile: {},
@@ -238,6 +240,24 @@
     if (typeof doScan === 'function') { doScan(); }
   };
 
+  /* 自动刷新的两个开关存在 settings.json 里（cx.autoScan / cx.autoSign）。
+     设置面板改完会调 window.cxApplySettings 把新值同步过来。 */
+  function loadAutoCfg() {
+    api('/api/settings').then(function (d) {
+      if (d && d.settings) { applySettings(d.settings); }
+    }).catch(function () { /* 拿不到就用默认：刷新开、签到关 */ });
+  }
+
+  function applySettings(cfg) {
+    var cx = (cfg || {}).cx || {};
+    S.cfg = { autoScan: cx.autoScan !== false, autoSign: !!cx.autoSign };
+    // 安卓不做自动签到，即使配置里是 true 也按 false 走
+    if (document.body.classList.contains('is-android')) { S.cfg.autoSign = false; }
+    startAutoScan();
+  }
+
+  window.cxApplySettings = applySettings;
+
   function doScan() {
     if (!S.loggedIn) { return Promise.resolve(); }
     S.busy = true;
@@ -255,7 +275,43 @@
       }
       paintState();
       paintList();
+      if (d && d.ok) { autoSignIfEnabled(); }
     });
+  }
+
+  /* 自动签到：只在桌面版、且设置里勾了「自动签到」时执行。
+     安卓不做（README 里有说明），所以这里先判一次平台。
+     串行提交，避免几个签到同时打出去。 */
+  function autoSignIfEnabled() {
+    if (document.body.classList.contains('is-android')) { return; }
+    if (!S.cfg || !S.cfg.autoSign) { return; }
+    if (AUTO.running) { return; }
+    var targets = liveSigns().filter(function (x) { return x.canAuto && !x.signed; });
+    if (!targets.length) { return; }
+    AUTO.running = true;
+    toast('自动签到：' + targets.length + ' 条', 'ok');
+    var i = 0;
+    function next() {
+      if (i >= targets.length) {
+        AUTO.running = false;
+        AUTO.lastSign = Date.now();
+        return;
+      }
+      var it = targets[i++];
+      signOne(it, {}).then(function () { next(); }, function () { next(); });
+    }
+    next();
+  }
+
+  /* 自动刷新：每 60 秒扫一次（设置里可关）。页面不可见时跳过，省电。 */
+  function startAutoScan() {
+    if (AUTO.timer) { clearInterval(AUTO.timer); AUTO.timer = 0; }
+    AUTO.timer = setInterval(function () {
+      if (!S.loggedIn || S.busy) { return; }
+      if (document.hidden) { return; }
+      if (!S.cfg || S.cfg.autoScan === false) { return; }
+      doScan();
+    }, 60000);
   }
 
   /* --------------------------------------------------------- 签到与补输入 */
@@ -489,6 +545,8 @@
 
   function start() {
     wire();
+    loadAutoCfg();
+    startAutoScan();
     refresh().then(function () {
       // 登录了就先扫一次，省得用户还得手点
       if (S.loggedIn) { doScan(); }
