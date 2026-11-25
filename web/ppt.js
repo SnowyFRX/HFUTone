@@ -158,14 +158,17 @@
   var pick = $('setCxPick');
   if (pick) {
     pick.addEventListener('click', function (e) {
+      // 安卓：交给 WebViewClient（原生侧用系统浏览器打开），这里别拦
+      if (document.body.classList.contains('is-android')) { return; }
+      // 桌面 QtWebEngine 不处理 target=_blank，交给后端用系统浏览器打开
       e.preventDefault();
       var url = pick.getAttribute('href') || '';
       api('/api/open-url', { url: url }).then(function (d) {
         if (!d || !d.ok) {
-          toast('这个环境打不开浏览器，请手动复制：' + url, 'warn');
+          toast('系统没打开浏览器，链接已显示在设置里，长按可复制', 'warn');
         }
       }).catch(function () {
-        toast('请手动复制：' + url, 'warn');
+        toast('系统没打开浏览器，链接已显示在设置里，长按可复制', 'warn');
       });
     });
   }

@@ -38,7 +38,26 @@ public class MainActivity extends Activity {
         // WebView 默认白底：Python 起服务的那几百毫秒会先闪一屏纯白。
         // 设成页面自己的米色，冷启动看起来是一体的。
         web.setBackgroundColor(Color.parseColor("#F7F4ED"));
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            /**
+             * 页面里的 http(s) 链接（比如设置里的「腾讯坐标拾取器」）一律交给系统浏览器。
+             * 默认行为是在 WebView 里导航过去 —— 那会把整个 App 页面顶掉，只能杀掉重进。
+             */
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    try {
+                        Intent it = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        startActivity(it);
+                        return true;
+                    } catch (Exception ignored) {
+                        // 没装浏览器：让 WebView 自己兜着
+                    }
+                }
+                return false;
+            }
+        });
         setContentView(web);
 
         // debug 包才开 WebView 调试：桌面 chrome://inspect 能直接看到页面控制台，
