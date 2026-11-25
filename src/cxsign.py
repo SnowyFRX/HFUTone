@@ -475,6 +475,13 @@ class CxSigner:
             return {'ok': False, 'status': 'failed', 'detail': '缺少活动或课程 id',
                     'needs': []}
 
+        # 人脸核验：不是"再试一次"能绕过的，硬提交只会换来服务端一句
+        # 「签到环境异常，请重新进入签到页」。直接说清楚，别浪费一次请求。
+        if item.get('needFace') and not with_face:
+            return {'ok': False, 'status': 'need',
+                    'detail': '这次签到要求人脸核验，本工具做不了，请用官方学习通 App 扫脸',
+                    'needs': ['人脸']}
+
         with self._lock:
             if aid in self._signing:
                 return {'ok': False, 'status': 'busy', 'detail': '这一条正在签',

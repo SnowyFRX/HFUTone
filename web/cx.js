@@ -371,6 +371,10 @@
   }
 
   function signOne(item, extra) {
+    if (item && item.needFace && !(extra && extra.face)) {
+      toast('这条签到要求人脸核验，本工具做不了，请用官方学习通 App 扫脸', 'warn');
+      return Promise.resolve({ ok: false, status: 'need' });
+    }
     S.busy = true;
     paintState();
     var payload = { item: item };
