@@ -14,8 +14,8 @@ Windows 一个 `HFUTone.exe`，Android 一个 apk，两端共用同一套业务�
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `HFUTone-1.1-win64.zip` | 解压到任意目录，双击 `HFUTone.exe`。免安装、无依赖 |
-| Android | `HFUTone-1.1-release.apk` | 应用内版本 **1.4.4**（versionCode 24），支持 arm64 / x86_64，Android 7.0+ |
+| Windows x64 | `HFUTone-1.4.4-win64.zip` | 解压到任意目录，双击 `HFUTone.exe`。免安装、无依赖 |
+| Android | `HFUTone-1.4.4-release.apk` | 应用内版本 **1.4.4**（versionCode 24），支持 arm64 / x86_64，Android 7.0+ |
 
 > 安卓装完请到「设置 → 应用 → HFUTone」确认版本是 **1.4.4**。显示的比这个旧，说明装的是旧包，卸载重装一次。
 

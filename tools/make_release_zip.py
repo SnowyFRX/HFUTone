@@ -27,6 +27,24 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
 
+
+def version() -> str:
+    """从 android/app/build.gradle 读 versionName，读不到就退回 dev。
+
+    产物名跟着版本号走（HFUTone-1.4.4-win64.zip）。以前这里写死 1.1，
+    发了三个版本之后，Release 里还挂着 HFUTone-1.1-* 的名字，和包里的
+    versionCode 对不上，只能靠人记住这件事。
+    """
+    import re
+    gradle = HERE / 'android' / 'app' / 'build.gradle'
+    try:
+        m = re.search(r"versionName\s+'([^']+)'", gradle.read_text('utf-8'))
+        if m:
+            return m.group(1).strip()
+    except OSError:
+        pass
+    return 'dev'
+
 # 目录名前缀命中即整棵跳过
 SKIP_DIRS = {
     '.config',
@@ -102,7 +120,7 @@ def build(src: Path, out: Path, root_name: str | None = None) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('--src', default=str(HERE / 'dist' / 'HFUTone'))
-    ap.add_argument('--out', default=str(HERE / 'HFUTone-1.1-win64.zip'))
+    ap.add_argument('--out', default=str(HERE / f'HFUTone-{version()}-win64.zip'))
     ap.add_argument('--root', default=None, help='zip 内的顶层目录名，默认取源目录名')
     args = ap.parse_args()
     return build(Path(args.src), Path(args.out), args.root)

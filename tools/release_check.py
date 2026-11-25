@@ -11,7 +11,7 @@
   3. 内容层：小体积文本文件里出现 sessionid= / app_cookie / "token": 等明文特征
 
 用法：
-    python tools/release_check.py --zip HFUTone-1.1-win64.zip
+    python tools/release_check.py --zip HFUTone-<版本>-win64.zip
     python tools/release_check.py --dir dist/HFUTone      # 打包前先看源目录
     python tools/release_check.py --zip x.zip --quiet     # 只靠退出码
 退出码：0 干净，1 有命中，2 用法/IO 错误。
