@@ -538,37 +538,40 @@ class CxSigner:
                             lat: float, lng: float, d0: float,
                             validate: str = '', face_id: str = '',
                             face_enc: str = '', offset: float = 0.01
-                            ) -> tuple[float | None, float | None, int]:
+                            ) -> tuple[float | None, float | None, int, bool]:
         """用多次提交的距离反推老师设的签到点。
 
         第一次（调用方已经做过）得到 d0。再补两个探测点构成三角形，
         三次观测解出目标点；窗口足够长时这套比"让用户自己抠经纬度"可靠得多。
         探测点的偏移取 0.01 度（约 1.1 km），保证三个圆不退化。
 
-        返回 (lat, lng, 探测次数)；解不出来时 lat 为 None。
+        返回 (lat, lng, 探测次数, 探测过程中是否已直接签到成功)；解不出来时 lat 为 None。
         """
         api = self.api
         probes = [(lat + offset, lng), (lat, lng + offset)]
         obs = [(lat, lng, d0)]
         for plat, plng in probes:
             try:
-                _ok, pmsg = api.sign_location(cid, aid, addr, plat, plng, url,
+                pok, pmsg = api.sign_location(cid, aid, addr, plat, plng, url,
                                               validate=validate, face_id=face_id,
                                               face_enc=face_enc)
             except Exception as exc:                       # noqa: BLE001
                 core.log(f'[学习通] 坐标探测失败：{exc}')
                 continue
+            if pok or '已签到' in str(pmsg or ''):
+                core.log(f'[学习通] 坐标探测直接命中签到范围：{plat:.6f},{plng:.6f}')
+                return plat, plng, len(obs) + 1, True
             d = _parse_meters(pmsg)
             if d is None:
-                # 探测点直接成功（说明目标点就在附近），把这点当成结果
-                return plat, plng, len(obs) + 1
+                # 探测点没有返回距离（可能是验证码等），停止继续探测
+                return plat, plng, len(obs) + 1, False
             obs.append((plat, plng, d))
             core.log(f'[学习通] 坐标探测 {len(obs)}：距离 {d:.1f} 米')
         pt = _solve_point(obs)
         if not pt:
-            return None, None, len(obs)
+            return None, None, len(obs), False
         core.log(f'[学习通] 三点定位结果：{pt[0]:.6f},{pt[1]:.6f}（残差已校验）')
-        return pt[0], pt[1], len(obs)
+        return pt[0], pt[1], len(obs), False
 
     def _do_sign(self, item, st, aid, cid, url, pattern, code, enc,
                  address, lat, lng, validate, photo_path, with_face) -> dict:
@@ -658,7 +661,7 @@ class CxSigner:
                         total = 0
                         base_lat, base_lng, base_d = la, ln, d0
                         for rnd, off in ((1, 0.01), (2, 0.003)):
-                            lat2, lng2, tries = self._locate_by_distance(
+                            lat2, lng2, tries, hit_ok = self._locate_by_distance(
                                 cid, aid, url, addr, base_lat, base_lng, base_d,
                                 validate=validate, face_id=face_id, face_enc=face_enc,
                                 offset=off)
@@ -666,18 +669,19 @@ class CxSigner:
                             if lat2 is None:
                                 break
                             base_lat, base_lng = lat2, lng2
+                            self.default_location = {'address': addr,
+                                                     'lat': lat2, 'lng': lng2}
+                            item['_calibrated'] = {'lat': lat2, 'lng': lng2}
+                            if hit_ok:
+                                ok, msg = True, f'签到成功（坐标探测直接命中，累计 {total} 次）'
+                                break
                             ok2, msg2 = api.sign_location(
                                 cid, aid, addr, lat2, lng2, url,
                                 validate=validate, face_id=face_id, face_enc=face_enc)
                             core.log(f'[学习通] 第 {rnd} 轮定位 {lat2:.6f},{lng2:.6f} -> '
                                      f'{"成功" if ok2 else "仍失败"}（累计 {total} 次探测）')
-                            # 校准出来的点立刻记成默认坐标：下一步很可能要验证码，
-                            # 用户滑完回来重交时必须用这个新点，否则又差 885 米。
-                            self.default_location = {'address': addr,
-                                                     'lat': lat2, 'lng': lng2}
-                            item['_calibrated'] = {'lat': lat2, 'lng': lng2}
-                            if ok2:
-                                ok, msg = True, msg2
+                            if ok2 or '已签到' in str(msg2 or ''):
+                                ok, msg = True, msg2 or '签到成功'
                                 break
                             d2 = _parse_meters(msg2)
                             msg = (msg2 or msg) + (f'（已校准 {total} 次）' if d2 is None else '')

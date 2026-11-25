@@ -8,7 +8,7 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
-  var AUTO = { timer: 0, lastSign: 0, running: false };
+  var AUTO = { timer: 0, lastSign: 0, running: false, promptedCap: {} };
 
   var S = {
     loggedIn: false,
@@ -191,6 +191,7 @@
     if (S.signs.length) { S.loaded = true; }
     paintState();
     paintList();
+    promptCaptchaIfNeeded();
   }
 
   function refresh() {
@@ -280,12 +281,37 @@
   }
 
   /* 自动签到已统一交由后端 AutoSignEngine（IM 事件秒签 + 低频轮询，桌面与安卓通用）。
-     这里只在前端刷新发现尚有可自动项时唤醒后端处理一次，避免前后端并发重复提交。 */
+     这里只在前端刷新发现尚有可自动项时唤醒后端处理一次，避免前后端并发重复提交；
+     若遇到需要验证码（showVCode=1）的签到，则自动弹出可见的滑动验证框交由用户手动完成。 */
+  function promptCaptchaIfNeeded() {
+    if (!S.cfg || !S.cfg.autoSign) { return; }
+    if (document.hidden) { return; }
+    if (document.querySelector('.backdrop.open')) { return; }
+    var capItems = liveSigns().filter(function (x) {
+      if (x.signed || !x.needCaptcha) { return false; }
+      if (AUTO.promptedCap[x.activeId]) { return false; }
+      // 只对除验证码外已具备条件的普通/位置签到主动弹窗
+      if (x.signType !== 'normal' && x.signType !== 'location') { return false; }
+      var miss = x.missing || [];
+      return miss.indexOf('位置') < 0;
+    });
+    if (!capItems.length) { return; }
+    var it = capItems[0];
+    AUTO.promptedCap[it.activeId] = true;
+    toast((it.courseName || '学习通') + ' · ' + (it.name || '签到') + ' 需要完成滑动验证', 'warn');
+    capOpen(it.url || 'https://mobilelearn.chaoxing.com/', function (v) {
+      signOne(it, { validate: v });
+    }, true);
+  }
+
   function autoSignIfEnabled() {
     if (!S.cfg || !S.cfg.autoSign) { return; }
     if (AUTO.running) { return; }
     var targets = liveSigns().filter(function (x) { return x.canAuto && !x.signed; });
-    if (!targets.length) { return; }
+    if (!targets.length) {
+      promptCaptchaIfNeeded();
+      return;
+    }
     AUTO.running = true;
     api('/api/autosign/trigger', { platform: 'cx' }).then(function (d) {
       AUTO.running = false;
@@ -293,7 +319,9 @@
       if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
       if (d && d.cx && d.cx.signed) {
         toast('后端已自动签到 ' + d.cx.signed + ' 条', 'ok');
-        refresh();
+        refresh().then(promptCaptchaIfNeeded);
+      } else {
+        promptCaptchaIfNeeded();
       }
     }, function () {
       AUTO.running = false;
@@ -408,7 +436,7 @@
     return true;
   }
 
-  function capLoad(then) {
+  function capLoad(then, manualOnly) {
     capReset();
     var bg = $("cxCapBg");
     var slice = $("cxCapSlice");
@@ -428,6 +456,11 @@
           CAP.bgImg = imgs[0];
           CAP.slImg = imgs[1];
           CAP.bgW = imgs[0].naturalWidth || 320;
+          if (manualOnly) {
+            if (msg) { msg.textContent = "请手动把拼图拖到缺口处，然后点「验证」"; }
+            if (then) { then(false); }
+            return;
+          }
           var g = capDetect();
           if (g && g.ok && capAutoPlace(g)) {
             if (msg) { msg.textContent = "已自动识别缺口，正在验证…"; }
@@ -461,14 +494,14 @@
     if (b) { b.classList.remove("open"); }
   }
 
-  function capOpen(referer, onOk) {
+  function capOpen(referer, onOk, manualOnly) {
     CAP.referer = referer || "https://mobilelearn.chaoxing.com/";
     CAP.onOk = onOk;
-    CAP.autoSubmit = true;     // 识别得到才自动点「验证」，识别不到就等人拖
+    CAP.autoSubmit = !manualOnly;
     CAP.autoTries = 0;
     pauseAuto();          // 取图/验图期间别让自动刷新抢通道
     capShow();
-    capLoad(capAutoAfterLoad);
+    capLoad(manualOnly ? null : capAutoAfterLoad, !!manualOnly);
   }
 
   function capDragStart(e) {
