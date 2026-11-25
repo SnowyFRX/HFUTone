@@ -464,7 +464,7 @@ def _request_py(method: str, url: str, *, cookie: str = '', referer: str = '',
 
 def fetch_bytes(url: str, *, referer: str = '', cookie: str = '',
                 headers: dict | None = None, timeout: int = 30,
-                out_path: str | None = None) -> bytes | None:
+                out_path: str | None = None, follow: bool = False) -> bytes | None:
     """取二进制（图片/课件页）。有 curl 用 curl，没有就用 urllib。
 
     存在的理由：课件页、学习通图片上传前的下载，都需要原始字节。走 request()
@@ -484,6 +484,10 @@ def fetch_bytes(url: str, *, referer: str = '', cookie: str = '',
 
     if _use_curl():
         args = [curl_path(), '-s', '--max-time', str(int(timeout))]
+        # 学习通图床 p.ananas.chaoxing.com 对 http:// 一律 301 到 https，
+        # 不跟就会拿到空 body（人脸那条链就是这么悄悄断掉的）。
+        if follow:
+            args.append('-L')
         if out_path:
             args += ['-o', out_path]
         args += [url]
@@ -570,6 +574,13 @@ def request(method: str, url: str, *, cookie: str = '', referer: str = '',
         if _app_uid and not any(k.lower() == 'x-uid' for k in merged):
             merged['x-uid'] = _app_uid
         extra = merged
+
+    # multipart 上传时要把调用方那个 content-type 摘掉：
+    # 学习通 App 头里固定写的是 application/x-www-form-urlencoded，而 curl -F
+    # 会自己生成 multipart/form-data; boundary=...，两个 -H 一发，服务端拿到的
+    # 是按 urlencoded 解析的 multipart 体，字段全是 null（"puid不能为空" 就是这儿）。
+    if files:
+        extra = {k: v for k, v in extra.items() if k.lower() != 'content-type'}
 
     if not any(k.lower() == 'user-agent' for k in extra):
         args += ['-H', f'User-Agent: {UA}']

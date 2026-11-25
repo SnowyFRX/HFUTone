@@ -982,7 +982,7 @@ class CxFace:
         original = str(data.get('objectid') or '')
         if not url:
             return '', '历史人脸没有图片地址'
-        new_id, err = upload_image(self.cx, url, tag='face')
+        new_id, err = upload_image(self.cx, url, tag='face', vary=True)
         return (new_id or original), ('' if (new_id or original) else err)
 
     def face_enc(self, active_id: str, face_id: str) -> tuple[str, str]:
@@ -1008,32 +1008,41 @@ class CxFace:
         return '', '人脸校验不通过'
 
 
-def upload_image(cx: Cx, url_or_path: str, tag: str = 'img') -> tuple[str, str]:
+def upload_image(cx: Cx, url_or_path: str, tag: str = 'img',
+                 vary: bool = False) -> tuple[str, str]:
     """把一张图传到学习通云盘，返回 objectId。
 
     url_or_path 是 http 地址就先下到临时文件。上传前先查 CRC，
     已经传过就直接复用 objectId——服务端认这个。
+
+    vary=True 时上传前给文件加两个字节。人脸那条必须开：
+    同一张历史脸原样重传，CRC 查得到、objectId 跟上次一模一样，服务端
+    认作「复用同一张脸」，反而回一句「签到环境异常」。原项目（course_helper）
+    改的是 EXIF 的 UserComment，作用相同——让文件不再是那个文件，从而换到
+    新的 objectId。这里用追加尾巴，JPEG 解码器本来就会忽略 EOI 之后的内容。
     """
     import tempfile
 
     tmp_path = ''
     try:
         if url_or_path.startswith('http'):
-            r = core.request('GET', url_or_path, cookie=cx.cookie,
-                             extra_headers=cx.headers, timeout=30, tag='cx-dl')
-            if r.status != 200 or not r.body:
-                return '', f'下载图片失败（HTTP {r.status}）'
             fd, tmp_path = tempfile.mkstemp(suffix='.jpg')
             os.close(fd)
+            # 图床对 http:// 一律 301 到 https：不跟随就是空 body，
+            # 以前这里先 request 探一下状态，301 直接当失败，人脸就废了。
             if not core.fetch_bytes(url_or_path, cookie=cx.cookie,
                                     headers=cx.headers, timeout=30,
-                                    out_path=tmp_path):
+                                    out_path=tmp_path, follow=True):
                 return '', '下载图片失败'
             src = tmp_path
         else:
             src = url_or_path
             if not os.path.exists(src):
                 return '', '图片文件不存在'
+
+        if vary:
+            with open(src, 'ab') as f:
+                f.write(b'\x00' + str(int(time.time() * 1000)).encode())
 
         # 拿上传 token
         r = cx._get(PAN + '/api/token/uservalid')

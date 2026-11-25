@@ -6,6 +6,13 @@ import cxapi as cx
 import cxsign
 
 
+class FakeStore:
+    """群聊那条路要读 IM 账号。这里给个空 store，让它走「没有 IM 账号」的分支。"""
+
+    def get_user(self):
+        return {}
+
+
 class FakeApi:
     """假学习通：只实现编排层用到的那几个方法。"""
 
@@ -18,6 +25,7 @@ class FakeApi:
         self.device = {'sc': 'sc-token', 'cid': 'cid-1'}
         self.signed = set()
         self.calls = []
+        self.store = FakeStore()
 
     @property
     def ready(self):

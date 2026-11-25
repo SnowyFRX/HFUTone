@@ -542,20 +542,33 @@ class CxSigner:
                  address, lat, lng, validate, photo_path, with_face) -> dict:
         api = self.api
 
-        # 人脸：**默认不带**。
-        # 实测（2026-11-25，活动 7000182117360）：
-        #   不带 validate            -> 「距教师指定签到地点885.0米」
-        #   带假 validate            -> 「距教师指定签到地点885.0米」
-        #   带 validate + 人脸字段   -> 「签到环境异常，请重新进入签到页」
-        # 也就是说：复用历史人脸取来的 faceEnc 会被服务端识破，反而把一次
-        # 本来能靠「位置准 + validate」成功的提交打成环境异常。所以只有调用方
-        # 明确 with_face=True 才带；item.needFace 只用来提示用户，不再自动取。
+        # 人脸：needFace（openCheckFaceFlag=1）的活动**必须**带 —— 不带就是签不上。
+        #
+        # 2026-11-25 早先实测过一次「带人脸反而被判『签到环境异常』」，于是把
+        # 人脸改成默认不带。那个结论在当时是对的，但它只是症状：底下压着三个
+        # bug，叠起来的效果就是「上传从来没成功，faceId 永远是历史那一个」。
+        #   1) 历史人脸的图床 p.ananas.chaoxing.com 对 http:// 回 301，
+        #      下载没跟随 -> 空 body -> 直接 return 原 objectId
+        #   2) 上传那条 multipart 被 App 头里固定的 urlencoded content-type 盖掉
+        #      -> 服务端按 urlencoded 解析 -> 字段全 null（"puid不能为空"）
+        #   3) 就算传上去，文件字节没变 -> crcStorageStatus 命中 -> 服务端把同一个
+        #      objectId 原样还回来，等于没换脸
+        # 三处都修掉之后实测：原图上传回来的仍是历史 objectId，加两个字节上传就
+        # 拿到新的（4943dc4f… ≠ 5d7292b1…），复用检测这才真正被绕过。
+        # 所以这里改回「needFace 就带」，并且下面留一条退路：真撞上环境异常就
+        # 去掉人脸重交一次，别让一张脸把本来能签的提交弄废。
+        # 只在这两类里带人脸，和 course_helper 一致（它的 normal.dart 压根不碰 FaceApi）：
+        # 普通签到就算 openCheckFaceFlag=1 也不带，白取一次人脸等于多往云盘传一张图，
+        # 而且会在服务端多登记一个 objectId，没道理。
+        want_face = bool(with_face or item.get('needFace')) and st in ('location', 'qrcode')
         face_id = face_enc = ''
-        if with_face:
+        if want_face:
             try:
                 face_id, ferr = cx.CxFace(api).face_id()
                 if face_id:
-                    face_enc, _ = cx.CxFace(api).face_enc(aid, face_id)
+                    face_enc, ferr2 = cx.CxFace(api).face_enc(aid, face_id)
+                    if not face_enc:
+                        core.log(f'[学习通] 人脸凭据不可用：{ferr2}')
                 elif ferr:
                     core.log(f'[学习通] 人脸不可用：{ferr}')
             except Exception as exc:                       # noqa: BLE001
@@ -652,6 +665,21 @@ class CxSigner:
         except Exception as exc:                           # noqa: BLE001
             return {'ok': False, 'status': 'failed',
                     'detail': core.head(str(exc), 120), 'needs': []}
+
+        # 带了人脸仍被判「环境异常」：去掉人脸重交一次。强制人脸的活动不带也签不上，
+        # 但不至于因为一张脸把整次提交弄废 —— 这是旧行为的兜底，不是退回到默认。
+        if (not ok) and face_id and '环境异常' in str(msg or ''):
+            core.log('[学习通] 带人脸被判环境异常，去掉人脸重交一次')
+            face_id = face_enc = ''
+            try:
+                if st == 'location':
+                    ok, msg = api.sign_location(cid, aid, addr, la, ln, url,
+                                                validate=validate)
+                elif st == 'qrcode':
+                    ok, msg = api.sign_qrcode(cid, aid, enc, url, address=addr,
+                                              lat=la, lng=ln, validate=validate)
+            except Exception as exc:                       # noqa: BLE001
+                core.log(f'[学习通] 去人脸重交失败：{exc}')
 
         if ok:
             self._refresh_one(item)
