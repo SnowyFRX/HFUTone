@@ -578,9 +578,23 @@
       }
       if (needs.indexOf('验证码') >= 0) {
         paintState();
+        // 坐标校准可能已经在失败重试里跑过了，结果随 d.calibrated 回来。
+        // 先把它落盘，滑完验证码重交时才用得上（否则又差 800 多米）。
+        if (d && d.calibrated && d.calibrated.lat && d.calibrated.lng) {
+          item.lat = d.calibrated.lat;
+          item.lng = d.calibrated.lng;
+          // saveSettings 在 ppt.js 的闭包里，cx.js 拿不到（和 openBackdrop 一样的坑），
+          // 所以直接打 /api/settings。
+          api('/api/settings', {
+            cx: { location: { lat: d.calibrated.lat, lng: d.calibrated.lng } }
+          }).catch(function () { /* 落盘失败不影响这次签到 */ });
+          toast('坐标已自动校准到 ' + d.calibrated.lat.toFixed(6) + ', '
+                + d.calibrated.lng.toFixed(6), 'ok');
+        }
         // 学习通的验证码是滑块，不是手填字符串：取图 → 拖动 → 换 validate → 重交
         capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (validate) {
-          signOne(item, { validate: validate, enc: (d && d.enc2) || '' });
+          signOne(item, { validate: validate, enc: (d && d.enc2) || '',
+                          lat: item.lat, lng: item.lng });
         });
         return;
       }

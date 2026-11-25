@@ -542,9 +542,16 @@ class CxSigner:
                  address, lat, lng, validate, photo_path, with_face) -> dict:
         api = self.api
 
-        # 人脸：只有明确要求时才去取，取不到就照常提交（服务端会拒再报）
+        # 人脸：**默认不带**。
+        # 实测（2026-11-25，活动 7000182117360）：
+        #   不带 validate            -> 「距教师指定签到地点885.0米」
+        #   带假 validate            -> 「距教师指定签到地点885.0米」
+        #   带 validate + 人脸字段   -> 「签到环境异常，请重新进入签到页」
+        # 也就是说：复用历史人脸取来的 faceEnc 会被服务端识破，反而把一次
+        # 本来能靠「位置准 + validate」成功的提交打成环境异常。所以只有调用方
+        # 明确 with_face=True 才带；item.needFace 只用来提示用户，不再自动取。
         face_id = face_enc = ''
-        if with_face or item.get('needFace'):
+        if with_face:
             try:
                 face_id, ferr = cx.CxFace(api).face_id()
                 if face_id:
@@ -619,6 +626,11 @@ class CxSigner:
                                 validate=validate, face_id=face_id, face_enc=face_enc)
                             core.log(f'[学习通] 第 {rnd} 轮定位 {lat2:.6f},{lng2:.6f} -> '
                                      f'{"成功" if ok2 else "仍失败"}（累计 {total} 次探测）')
+                            # 校准出来的点立刻记成默认坐标：下一步很可能要验证码，
+                            # 用户滑完回来重交时必须用这个新点，否则又差 885 米。
+                            self.default_location = {'address': addr,
+                                                     'lat': lat2, 'lng': lng2}
+                            item['_calibrated'] = {'lat': lat2, 'lng': lng2}
                             if ok2:
                                 ok, msg = True, msg2
                                 break
@@ -648,8 +660,13 @@ class CxSigner:
         # 要验证码：回执是 validate_<enc2>
         if msg.startswith('validate'):
             enc2 = msg.split('_', 1)[1] if '_' in msg else ''
-            return {'ok': False, 'status': 'need', 'detail': '要验证码',
-                    'needs': ['验证码'], 'enc2': enc2}
+            out = {'ok': False, 'status': 'need', 'detail': '要验证码',
+                   'needs': ['验证码'], 'enc2': enc2}
+            # 把这一步已经校准出来的坐标带回前端，滑完验证码重交时用它
+            cal = item.get('_calibrated')
+            if cal:
+                out['calibrated'] = cal
+            return out
         return {'ok': False, 'status': 'failed', 'detail': msg, 'needs': []}
 
     def _refresh_one(self, item: dict) -> None:
