@@ -434,6 +434,12 @@ class HfutLive:
         if explicit and os.path.exists(explicit):
             return HfutLive._kind_of(explicit), explicit
 
+        # 1.5) 打包内置的 mpv（程序目录下的 mpv/mpv.exe）
+        if getattr(sys, 'frozen', False):
+            builtin = Path(sys.executable).resolve().parent / 'mpv' / 'mpv.exe'
+            if builtin.is_file():
+                return 'mpv', str(builtin)
+
         # 2) 缓存上一次找到的路径
         cache = CONFIG_DIR / 'player.cache'
         if not force:

@@ -8,7 +8,7 @@
 产物 dist/HFUTone：
   HFUTone.exe         主程序（无控制台）
   _internal/          运行时（PyQt5 / QtWebEngine / web 静态资源 / vendor/curl）
-  mpv/                由 build_release.py 事后复制（内置播放器）
+  mpv/                由 build.py 从 mpv/mpv.exe.xz 解压（内置播放器）
 
 注意：web/server.py、src/*.py 是运行时插入 sys.path 导入的，PyInstaller
 静态分析看不到，必须用 pathex + hiddenimports 显式指明。

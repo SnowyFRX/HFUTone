@@ -21,6 +21,28 @@ BACKUP = HERE / '.config-backup'
 SRC_CFG = HERE / '.config'
 
 
+MPV_PKG = HERE / 'mpv' / 'mpv.exe.xz'
+MPV_DIR = DIST / 'mpv'
+
+
+def _unpack_mpv() -> None:
+    """把 mpv/mpv.exe.xz 解到 dist/HFUTone/mpv/。
+
+    仓库里存的是压缩包：mpv.exe 原文件 117 MB，超过 GitHub 单文件 100 MB 的
+    限制。解压出来的播放器 hfutlive 会优先选中，用户不必自己装 mpv。
+    """
+    if not MPV_PKG.is_file():
+        print('[mpv] 没有 mpv/mpv.exe.xz，跳过内置播放器')
+        return
+    import lzma
+    import time
+    MPV_DIR.mkdir(parents=True, exist_ok=True)
+    dst = MPV_DIR / 'mpv.exe'
+    started = time.time()
+    dst.write_bytes(lzma.decompress(MPV_PKG.read_bytes()))
+    print(f'[mpv] {dst.name} {dst.stat().st_size:,} B（{time.time() - started:.1f}s）')
+
+
 def _copy_tree(src: Path, dst: Path) -> None:
     if not src.is_dir():
         return
@@ -78,7 +100,10 @@ def main() -> int:
         print(f'[失败] PyInstaller 退出码 {code}')
         return code
 
-    # 3) 还原配置：优先备份，没有就退到源树的 .config
+    # 3) 内置播放器：mpv/mpv.exe.xz -> dist/HFUTone/mpv/mpv.exe
+    _unpack_mpv()
+
+    # 4) 还原配置：优先备份，没有就退到源树的 .config
     source = BACKUP if BACKUP.is_dir() else SRC_CFG
     if source.is_dir():
         _copy_tree(source, CFG)
@@ -86,7 +111,7 @@ def main() -> int:
     else:
         print('[还原] 没有可还原的 .config')
 
-    # 4) 补一个"禁止发布"标记。它是 yktcore 运行时才写的，而 pyinstaller
+    # 5) 补一个"禁止发布"标记。它是 yktcore 运行时才写的，而 pyinstaller
     #    根本不运行 exe；还原又是从旧备份拷回来的（里面没有这个文件），
     #    所以这里得补。tools/release_check.py 认它。
     guard = CFG / '.do-not-ship'
