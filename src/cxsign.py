@@ -617,24 +617,12 @@ class CxSigner:
                  address, lat, lng, validate, photo_path, with_face) -> dict:
         api = self.api
 
-        # 人脸：needFace（openCheckFaceFlag=1）的活动**必须**带 —— 不带就是签不上。
-        #
-        # 2026-11-25 早先实测过一次「带人脸反而被判『签到环境异常』」，于是把
-        # 人脸改成默认不带。那个结论在当时是对的，但它只是症状：底下压着三个
-        # bug，叠起来的效果就是「上传从来没成功，faceId 永远是历史那一个」。
-        #   1) 历史人脸的图床 p.ananas.chaoxing.com 对 http:// 回 301，
-        #      下载没跟随 -> 空 body -> 直接 return 原 objectId
-        #   2) 上传那条 multipart 被 App 头里固定的 urlencoded content-type 盖掉
-        #      -> 服务端按 urlencoded 解析 -> 字段全 null（"puid不能为空"）
-        #   3) 就算传上去，文件字节没变 -> crcStorageStatus 命中 -> 服务端把同一个
-        #      objectId 原样还回来，等于没换脸
-        # 三处都修掉之后实测：原图上传回来的仍是历史 objectId，加两个字节上传就
-        # 拿到新的（4943dc4f… ≠ 5d7292b1…），复用检测这才真正被绕过。
-        # 所以这里改回「needFace 就带」，并且下面留一条退路：真撞上环境异常就
-        # 去掉人脸重交一次，别让一张脸把本来能签的提交弄废。
-        # 只在这两类里带人脸，和 course_helper 一致（它的 normal.dart 压根不碰 FaceApi）：
-        # 普通签到就算 openCheckFaceFlag=1 也不带，白取一次人脸等于多往云盘传一张图，
-        # 而且会在服务端多登记一个 objectId，没道理。
+        # 人脸：needFace（openCheckFaceFlag=1）的活动不带就签不上。只对
+        # location / qrcode 两类带，course_helper 的 normal.dart 也不带。
+        # 之前默认不带，是因为带上去会被判「环境异常」。查下来是三个 bug 让上传
+        # 从未生效（faceId 始终是历史那个）：图床 301 没跟随、multipart 的
+        # content-type 被 App 头盖掉、文件字节没变导致 CRC 命中复用。修完后已实测
+        # 能换到新 objectId。真撞上环境异常时去掉人脸重交一次。
         want_face = bool(with_face or item.get('needFace')) and st in ('location', 'qrcode')
         face_id = face_enc = ''
         if want_face:

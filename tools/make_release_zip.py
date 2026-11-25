@@ -31,9 +31,8 @@ HERE = Path(__file__).resolve().parent.parent
 def version() -> str:
     """从 android/app/build.gradle 读 versionName，读不到就退回 dev。
 
-    产物名跟着版本号走（HFUTone-1.4.4-win64.zip）。以前这里写死 1.1，
-    发了三个版本之后，Release 里还挂着 HFUTone-1.1-* 的名字，和包里的
-    versionCode 对不上，只能靠人记住这件事。
+    产物名跟着版本号走。以前写死 1.1，发了三个版本后 Release 里还挂着
+    HFUTone-1.1-*，和包里的 versionCode 对不上。
     """
     import re
     gradle = HERE / 'android' / 'app' / 'build.gradle'

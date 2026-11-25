@@ -396,8 +396,8 @@
     });
   }
 
-  /* 浏览器是两端唯一都有 JPEG/PNG 解码器的地方（安卓的 chaquopy 只带标准库），
-     所以缺口识别在前端做：canvas 取像素 -> cxgap.js 拟合白化模型。 */
+  /* 安卓的 chaquopy 只有标准库，没有图像解码器；浏览器两端都可用，
+     所以缺口识别走 canvas 取像素 + cxgap.js。 */
   function capPixels(img) {
     var w = img.naturalWidth || img.width;
     var h = img.naturalHeight || img.height;
@@ -420,7 +420,7 @@
     }
   }
 
-  /* 把拼图块摆到缺口上：缺口左边界减掉形状在切图里的左留白，就是画布该在的位置。 */
+  /* 拼图块摆到缺口位置：缺口左边界减去形状在切图里的左留白。 */
   function capAutoPlace(g) {
     var stage = $("cxCapStage");
     var slice = $("cxCapSlice");
@@ -538,9 +538,8 @@
     var left = parseFloat(slice.style.left) || 0;
     var x;
     if (CAP.gap && CAP.autoLeft != null && Math.abs(left - CAP.autoLeft) < 2) {
-      // 自动对位：缺口左边界(x) 减掉形状在切图里的左留白(x0)，就是拼图块
-      // 画布该在的位置，也正是服务端要的 x。这条不经过 280/264-8 那条
-      // 经验公式 —— 那条把人工视觉对位换算过来会偏 ~4px，只是碰巧在容差内。
+      // 自动对位：x - x0 就是服务端要的值，不走 280/264-8 的经验公式。
+      // 那条公式把人工对位换算过来偏约 4px，只是碰巧落在容差内。
       var ow = CAP.originalWidth || CAP.bgW || 320;
       x = (CAP.gap.x - CAP.gap.x0) * (ow / (CAP.bgW || 320));
     } else {

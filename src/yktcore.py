@@ -484,8 +484,7 @@ def fetch_bytes(url: str, *, referer: str = '', cookie: str = '',
 
     if _use_curl():
         args = [curl_path(), '-s', '--max-time', str(int(timeout))]
-        # 学习通图床 p.ananas.chaoxing.com 对 http:// 一律 301 到 https，
-        # 不跟就会拿到空 body（人脸那条链就是这么悄悄断掉的）。
+        # 学习通图床 p.ananas.chaoxing.com 对 http:// 返回 301，不跟随会拿到空 body。
         if follow:
             args.append('-L')
         if out_path:
@@ -575,10 +574,9 @@ def request(method: str, url: str, *, cookie: str = '', referer: str = '',
             merged['x-uid'] = _app_uid
         extra = merged
 
-    # multipart 上传时要把调用方那个 content-type 摘掉：
-    # 学习通 App 头里固定写的是 application/x-www-form-urlencoded，而 curl -F
-    # 会自己生成 multipart/form-data; boundary=...，两个 -H 一发，服务端拿到的
-    # 是按 urlencoded 解析的 multipart 体，字段全是 null（"puid不能为空" 就是这儿）。
+    # multipart 上传要摘掉调用方的 content-type：学习通 App 头固定写
+    # application/x-www-form-urlencoded，而 curl -F 会生成带 boundary 的
+    # multipart/form-data，两个头同时发出去，服务端按 urlencoded 解析，字段全 null。
     if files:
         extra = {k: v for k, v in extra.items() if k.lower() != 'content-type'}
 

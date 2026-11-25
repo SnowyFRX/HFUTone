@@ -999,11 +999,10 @@ class CxCaptcha:
 
 
 class CxFace:
-    """人脸识别。思路是拿首次采集的那张脸，改 EXIF 重新上传绕过复用检测。
+    """人脸凭据。用账号里已有的历史人脸，不采集。
 
-    这就是原项目干的：getUserFaceid 取历史人脸 -> 写 UserComment ->
-    重新传回云盘拿新 objectId -> 再换 faceEnc。没有真人脸库时这条走不通，
-    所以整个流程允许失败并让上层退回「不带人脸提交」。
+    getUserFaceid 取那张图 -> 改字节重传换新 objectId -> check-face-result
+    换 faceEnc。流程允许失败，上层会退回不带人脸提交。
     """
 
     def __init__(self, cx: Cx):
@@ -1050,14 +1049,12 @@ def upload_image(cx: Cx, url_or_path: str, tag: str = 'img',
                  vary: bool = False) -> tuple[str, str]:
     """把一张图传到学习通云盘，返回 objectId。
 
-    url_or_path 是 http 地址就先下到临时文件。上传前先查 CRC，
-    已经传过就直接复用 objectId——服务端认这个。
+    url_or_path 是 http 地址就先下到临时文件。上传前查 CRC，已经传过就复用
+    objectId。
 
-    vary=True 时上传前给文件加两个字节。人脸那条必须开：
-    同一张历史脸原样重传，CRC 查得到、objectId 跟上次一模一样，服务端
-    认作「复用同一张脸」，反而回一句「签到环境异常」。原项目（course_helper）
-    改的是 EXIF 的 UserComment，作用相同——让文件不再是那个文件，从而换到
-    新的 objectId。这里用追加尾巴，JPEG 解码器本来就会忽略 EOI 之后的内容。
+    vary=True 时上传前追加两个字节。人脸必须开：同一张脸原样重传，CRC 命中，
+    objectId 与上次相同，服务端判「环境异常」。原项目改 EXIF 的 UserComment，
+    作用相同，都是让文件不同从而换到新 objectId。
     """
     import tempfile
 
