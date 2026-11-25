@@ -346,17 +346,72 @@
 
      x 的算法照 course_helper：把拖到的位置换算成设计稿坐标，再乘 280/264 减 8，
      得到缺口左边界（原图像素）。 */
-  var CAP = { token: "", iv: "", ts: 0, referer: "", onOk: null, x: 0, dragging: false };
+  var CAP = { token: "", iv: "", ts: 0, referer: "", onOk: null, x: 0, dragging: false,
+              gap: null, autoLeft: null, autoSubmit: false, autoTries: 0,
+              bgImg: null, slImg: null, bgW: 320 };
 
   function capReset() {
     var slice = $("cxCapSlice");
     if (slice) { slice.style.left = "0px"; }
     CAP.x = 0;
+    CAP.gap = null;
+    CAP.autoLeft = null;
     var msg = $("cxCapMsg");
     if (msg) { msg.textContent = ""; msg.className = "err-line"; }
   }
 
-  function capLoad() {
+  /* 把一张图加载成 <img>，再写进页面。返回 Image，识别要用它的自然尺寸。 */
+  function capSetImage(el, src) {
+    return new Promise(function (resolve, reject) {
+      if (!src) { reject(new Error("没有图")); return; }
+      var im = new Image();
+      im.onload = function () { if (el) { el.src = src; } resolve(im); };
+      im.onerror = function () { reject(new Error("图片加载失败")); };
+      im.src = src;
+    });
+  }
+
+  /* 浏览器是两端唯一都有 JPEG/PNG 解码器的地方（安卓的 chaquopy 只带标准库），
+     所以缺口识别在前端做：canvas 取像素 -> cxgap.js 拟合白化模型。 */
+  function capPixels(img) {
+    var w = img.naturalWidth || img.width;
+    var h = img.naturalHeight || img.height;
+    var c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    var g = c.getContext("2d", { willReadFrequently: true });
+    g.drawImage(img, 0, 0);
+    return g.getImageData(0, 0, w, h);
+  }
+
+  function capDetect() {
+    if (!CAP.bgImg || !CAP.slImg || !window.CxGap) { return null; }
+    try {
+      var b = capPixels(CAP.bgImg);
+      var s = capPixels(CAP.slImg);
+      return window.CxGap.find(b.data, b.width, b.height,
+                               s.data, s.width, s.height);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* 把拼图块摆到缺口上：缺口左边界减掉形状在切图里的左留白，就是画布该在的位置。 */
+  function capAutoPlace(g) {
+    var stage = $("cxCapStage");
+    var slice = $("cxCapSlice");
+    if (!stage || !slice || !stage.clientWidth) { return false; }
+    var scale = stage.clientWidth / (g.bgW || 320);
+    var left = (g.x - g.x0) * scale;
+    var maxLeft = Math.max(0, stage.clientWidth - slice.clientWidth);
+    left = Math.max(0, Math.min(maxLeft, left));
+    slice.style.left = left + "px";
+    CAP.gap = g;
+    CAP.autoLeft = left;
+    CAP.x = left;
+    return true;
+  }
+
+  function capLoad(then) {
     capReset();
     var bg = $("cxCapBg");
     var slice = $("cxCapSlice");
@@ -371,12 +426,32 @@
       }
       CAP.token = d.token; CAP.iv = d.iv; CAP.ts = d.ts;
       CAP.originalWidth = d.width || 320;
-      if (bg) { bg.src = d.bg; }
-      if (slice) { slice.src = d.slice; }
-      if (msg) { msg.textContent = ""; }
+      return Promise.all([capSetImage(bg, d.bg), capSetImage(slice, d.slice)])
+        .then(function (imgs) {
+          CAP.bgImg = imgs[0];
+          CAP.slImg = imgs[1];
+          CAP.bgW = imgs[0].naturalWidth || 320;
+          var g = capDetect();
+          if (g && g.ok && capAutoPlace(g)) {
+            if (msg) { msg.textContent = "已自动识别缺口，正在验证…"; }
+            if (then) { then(true); }
+          } else {
+            if (msg) {
+              msg.textContent = g && g.reason ? g.reason
+                : "没能自动识别缺口，把拼图拖到缺口处再点「验证」";
+            }
+            if (then) { then(false); }
+          }
+        });
     }).catch(function (e) {
       if (msg) { msg.textContent = "取验证码失败：" + e; }
     });
+  }
+
+  /* 自动模式下的「识别完就提交」；人工接管后不再自动点。 */
+  function capAutoAfterLoad(found) {
+    if (!found || !CAP.autoSubmit) { return; }
+    setTimeout(function () { if (CAP.autoSubmit) { capSubmit(); } }, 240);
   }
 
   function capShow() {
@@ -392,13 +467,17 @@
   function capOpen(referer, onOk) {
     CAP.referer = referer || "https://mobilelearn.chaoxing.com/";
     CAP.onOk = onOk;
+    CAP.autoSubmit = true;     // 识别得到才自动点「验证」，识别不到就等人拖
+    CAP.autoTries = 0;
     pauseAuto();          // 取图/验图期间别让自动刷新抢通道
     capShow();
-    capLoad();
+    capLoad(capAutoAfterLoad);
   }
 
   function capDragStart(e) {
     CAP.dragging = true;
+    CAP.autoSubmit = false;       // 人工开始拖了，就别再自动提交
+    CAP.autoLeft = null;          // 位置不再是自动对位那个，提交改走人工换算
     CAP.startX = e.clientX != null ? e.clientX : (e.touches && e.touches[0].clientX) || 0;
     CAP.baseLeft = parseFloat(($("cxCapSlice") || {}).style.left) || 0;
   }
@@ -427,12 +506,21 @@
       return;
     }
     var left = parseFloat(slice.style.left) || 0;
-    // course_helper 的公式，一步不少：
-    //   显示位置 -> 设计稿(320 宽) -> 缺口左边界(乘 280/264 再减 8) -> 原图坐标(乘 originalWidth/320)
-    var design = left * (320 / stage.clientWidth);
-    var cutout = design * (280 / 264) - 8;
-    var ow = CAP.originalWidth || 320;
-    var x = cutout * (ow / 320);
+    var x;
+    if (CAP.gap && CAP.autoLeft != null && Math.abs(left - CAP.autoLeft) < 2) {
+      // 自动对位：缺口左边界(x) 减掉形状在切图里的左留白(x0)，就是拼图块
+      // 画布该在的位置，也正是服务端要的 x。这条不经过 280/264-8 那条
+      // 经验公式 —— 那条把人工视觉对位换算过来会偏 ~4px，只是碰巧在容差内。
+      var ow = CAP.originalWidth || CAP.bgW || 320;
+      x = (CAP.gap.x - CAP.gap.x0) * (ow / (CAP.bgW || 320));
+    } else {
+      // 人工拖动：沿用 course_helper 的公式，一步不少
+      //   显示位置 -> 设计稿(320 宽) -> 缺口左边界(乘 280/264 再减 8) -> 原图坐标
+      var design = left * (320 / stage.clientWidth);
+      var cutout = design * (280 / 264) - 8;
+      var ow2 = CAP.originalWidth || 320;
+      x = cutout * (ow2 / 320);
+    }
     if (x < 0) { x = 0; }
     if (msg) { msg.textContent = "正在验证…"; }
     api("/api/cx/captcha/verify", {
@@ -441,9 +529,18 @@
       if (d && d.ok && d.validate) {
         capHide();
         var cb = CAP.onOk; CAP.onOk = null;
+        CAP.autoSubmit = false;
         if (cb) { cb(d.validate); }
       } else {
-        if (msg) { msg.textContent = (d && d.error) || "验证没通过，换一张再试"; }
+        var why = (d && d.error) || "验证没通过";
+        if (CAP.autoSubmit && CAP.autoTries < 2) {
+          CAP.autoTries++;
+          if (msg) { msg.textContent = why + "，自动换一张再试…"; }
+          capLoad(capAutoAfterLoad);
+          return;
+        }
+        CAP.autoSubmit = false;
+        if (msg) { msg.textContent = why + "，手动把拼图拖到缺口再试"; }
         capLoad();
       }
     }).catch(function (e) {
