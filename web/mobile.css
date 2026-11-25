@@ -388,3 +388,35 @@ body.is-android #btnAccount {
 body.is-android .set-live-only {
   display: none !important;
 }
+
+/* ============================================================================
+   窄屏下的设置弹层
+   真机（CSS 视口 ~390px）上出现过的两个毛病：
+     · 卡片左右边距过大，可用宽度只剩 ~300px，里面的「纬度/经度」两栏一挤
+       输入框就顶出卡片边界；再加上 .sheet-wide 的 overflow:hidden，右边直接被裁掉
+     · 说明文字里有 "App 头）" 这种带括号的长串，没有断词点，整段被裁
+   所以：内边距收小、两栏改单列、给文字加断词。
+   ========================================================================== */
+@media (max-width: 480px) {
+  .sheet,
+  .pres-sheet {
+    padding: 16px 14px;
+  }
+
+  /* 设置项内部也收一收，别在 390px 上留太多死白 */
+  .set-grid { gap: 10px; }
+  .set-group { padding: 2px; }
+  .set-group .set-row { padding: 8px 10px; }
+  .set-group .cx-field { padding: 0 10px 8px; }
+
+  /* 纬度/经度：窄屏改单列，输入框才有完整宽度 */
+  .cx-row2 { grid-template-columns: 1fr; }
+
+  /* 长串（URL、带括号的文案）必须能断，否则溢出被裁 */
+  .set-hint,
+  .set-group .set-row em,
+  .sheet p.lead { overflow-wrap: anywhere; word-break: break-word; }
+
+  .sheet h2 { font-size: 18px; }
+  .sheet p.lead { font-size: 12.5px; }
+}

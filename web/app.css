@@ -1008,8 +1008,13 @@ button.play {
   position: fixed;
   top: 0; right: 0; bottom: 0; left: 0;  /* inset 简写在 QtWebEngine(Chromium 87) 不生效 */
   z-index: 40;
-  background: rgba(28, 28, 28, 0.26);
-  backdrop-filter: blur(6px);
+  /* 背景从 0.26 提到 0.34：没有模糊时也要能压住底下的内容 */
+  background: rgba(28, 28, 28, 0.42);
+  /* backdrop-filter 只是装饰，但代价不小：部分 Android WebView 和「禁用 GPU」
+     的 QtWebEngine 里，带 backdrop-filter 的 fixed 层会整层不绘制 ——
+     表现就是点了「设置」什么都没有（DOM 在、opacity 为 1、屏幕全空）。
+     只在支持的环境里加，别拿它赌能不能看见弹层。 */
+  /* 具体值在下面的 @supports 里给 */
   display: grid;
   place-items: center;
   padding: var(--s5);
@@ -1017,6 +1022,18 @@ button.play {
   pointer-events: none;
   transition: opacity var(--base) var(--ease);
 }
+@supports (backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px)) {
+  .backdrop {
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  /* 安卓 WebView 上还是别用：国产 ROM 的 WebView 版本参差，出现过整层不渲染 */
+  body.is-android .backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 .backdrop.open { opacity: 1; pointer-events: auto; }
 
 .sheet {
@@ -1025,6 +1042,7 @@ button.play {
   border: 1px solid var(--hairline);
   border-radius: var(--r-xl);
   padding: var(--s6);
+  box-shadow: 0 24px 64px rgba(20, 18, 14, 0.24);
   transform: translateY(10px) scale(0.985);
   opacity: 0;
   transition: transform var(--slow) var(--ease-out), opacity var(--base) var(--ease);

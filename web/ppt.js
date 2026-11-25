@@ -54,12 +54,13 @@
     // 学习通位置签到的默认坐标
     var loc = ((s.cx || {}).location || {});
     if ($('setCxAddress')) { $('setCxAddress').value = loc.address || ''; }
-    if ($('setCxLat')) {
-      $('setCxLat').value = (loc.lat === 0 || loc.lat == null) ? '' : loc.lat;
+    // 回填固定 6 位小数：学习通/腾讯拾取器给的坐标都是 6 位，少位会让人
+    // 以为精度被截掉了（之前直接赋 number，31.860000 会显示成 31.86）
+    function fmt6(v) {
+      return (v === 0 || v == null) ? '' : Number(v).toFixed(6);
     }
-    if ($('setCxLng')) {
-      $('setCxLng').value = (loc.lng === 0 || loc.lng == null) ? '' : loc.lng;
-    }
+    if ($('setCxLat')) { $('setCxLat').value = fmt6(loc.lat); }
+    if ($('setCxLng')) { $('setCxLng').value = fmt6(loc.lng); }
   }
 
   function loadSettings() {
@@ -132,8 +133,9 @@
     var locTimer = null;
     function saveLoc() {
       var addr = $('setCxAddress') ? $('setCxAddress').value.trim() : '';
-      var lat = $('setCxLat') ? parseFloat($('setCxLat').value) : NaN;
-      var lng = $('setCxLng') ? parseFloat($('setCxLng').value) : NaN;
+      // 统一到 6 位小数（1e-6 度约 0.1 米，再多一位没有意义）
+      var lat = $('setCxLat') ? parseFloat(Number($('setCxLat').value).toFixed(6)) : NaN;
+      var lng = $('setCxLng') ? parseFloat(Number($('setCxLng').value).toFixed(6)) : NaN;
       var patch = { cx: { location: { address: addr } } };
       if (!isNaN(lat)) { patch.cx.location.lat = lat; }
       if (!isNaN(lng)) { patch.cx.location.lng = lng; }
@@ -148,6 +150,23 @@
       if (!el) { return; }
       el.addEventListener('input', queueSaveLoc);
       el.addEventListener('change', queueSaveLoc);
+    });
+  }
+
+  /* 坐标拾取器链接：QtWebEngine 里 target=_blank 不会开新窗口，安卓 WebView 也不支持。
+     桌面版交给后端用系统浏览器打开；安卓那边后端会拒绝，提示手动复制。 */
+  var pick = $('setCxPick');
+  if (pick) {
+    pick.addEventListener('click', function (e) {
+      e.preventDefault();
+      var url = pick.getAttribute('href') || '';
+      api('/api/open-url', { url: url }).then(function (d) {
+        if (!d || !d.ok) {
+          toast('这个环境打不开浏览器，请手动复制：' + url, 'warn');
+        }
+      }).catch(function () {
+        toast('请手动复制：' + url, 'warn');
+      });
     });
   }
 

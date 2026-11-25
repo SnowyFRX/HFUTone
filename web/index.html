@@ -43,9 +43,9 @@
   window.addEventListener('unhandledrejection', function (e) { report('promise', e); });
 })();
 </script>
-<link rel="stylesheet" href="app.css?v=2026.11.25.1">
+<link rel="stylesheet" href="app.css?v=2026.11.25.7">
 <link rel="stylesheet" href="ykt.css?v=2026.11.25.5">
-<link rel="stylesheet" href="mobile.css?v=2026.11.24.5">
+<link rel="stylesheet" href="mobile.css?v=2026.11.25.7">
 </head>
 <body>
 
@@ -402,7 +402,11 @@
 
       <div class="set-group">
         <p class="set-title">学习通位置签到坐标</p>
-        <p class="set-hint">签到只有 5 秒窗口，坐标得提前配好。</p>
+        <p class="set-hint">
+          签到只有几秒窗口，坐标得提前配好。经纬度去
+          <a href="https://lbs.qq.com/getPoint/" id="setCxPick" target="_blank" rel="noopener">腾讯坐标拾取器</a>
+          点一下地图复制，保留到小数点后 6 位。
+        </p>
         <label class="cx-field">
           <span>地点描述</span>
           <input type="text" id="setCxAddress" spellcheck="false" placeholder="翡翠湖校区 · 西二302">
@@ -410,11 +414,11 @@
         <div class="cx-row2">
           <label class="cx-field">
             <span>纬度</span>
-            <input type="number" id="setCxLat" step="0.000001" min="-90" max="90" placeholder="31.86">
+            <input type="text" id="setCxLat" inputmode="decimal" step="0.000001" min="-90" max="90" placeholder="31.860123">
           </label>
           <label class="cx-field">
             <span>经度</span>
-            <input type="number" id="setCxLng" step="0.000001" min="-180" max="180" placeholder="117.28">
+            <input type="text" id="setCxLng" inputmode="decimal" step="0.000001" min="-180" max="180" placeholder="117.280456">
           </label>
         </div>
       </div>
