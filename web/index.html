@@ -214,19 +214,25 @@
         </section>
       </div>
 
-      <section class="autosign-card" id="autoSignPanel" aria-label="自动签到守护状态">
+      <section class="autosign-bar" id="autoSignPanel" aria-label="自动签到守护状态">
         <div class="autosign-head">
           <div class="autosign-title">
             <span class="dot" id="autoSignDot" aria-hidden="true"></span>
-            <strong id="autoSignTitle">自动签到守护：待机</strong>
+            <strong id="autoSignTitle">自动签到守护：未开启</strong>
           </div>
           <div class="autosign-actions">
-            <button type="button" id="autoSignClearBtn">清空</button>
+            <button type="button" id="autoSignQuickBtn" class="autosign-act-btn" hidden>去验证</button>
+            <button type="button" id="autoSignToggleBtn" aria-expanded="false">记录 ▾</button>
           </div>
         </div>
-        <p class="autosign-meta" id="autoSignMeta">学习通：关 · 雨课堂：关 · 轮询 180s</p>
-        <div class="autosign-events" id="autoSignEvents">
-          <p class="autosign-empty">开启自动签到后，IM 秒签与后台轮询记录会显示在这里。</p>
+        <div class="autosign-drawer" id="autoSignDrawer" hidden>
+          <div class="autosign-drawer-head">
+            <p class="autosign-meta" id="autoSignMeta">学习通：关 · 雨课堂：关</p>
+            <button type="button" id="autoSignClearBtn">清空</button>
+          </div>
+          <div class="autosign-events" id="autoSignEvents">
+            <p class="autosign-empty">暂无记录。</p>
+          </div>
         </div>
       </section>
     </div>

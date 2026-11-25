@@ -530,9 +530,22 @@
     setInterval(poll, 3000);
   }
 
-  /* ------------------------------------------------ 自动签到守护状态面板 */
+  /* ------------------------------------------------ 自动签到守护状态条 */
   var asPanel = $('autoSignPanel');
   var asLastId = 0;
+  var asQuickEvent = null;
+
+  function openNeedAction(ev) {
+    if (!ev || !ev.refId) { return; }
+    if (ev.platform === 'cx') {
+      if (window.HFUTCx && window.HFUTCx.signById) {
+        window.HFUTCx.signById(ev.refId, ev.item || null);
+      }
+    } else if (ev.platform === 'ykt') {
+      var tabYkt = $('tabYkt');
+      if (tabYkt) { tabYkt.click(); }
+    }
+  }
 
   function renderAutoSign(d) {
     if (!asPanel || !d || d.ok === false) { return; }
@@ -540,16 +553,19 @@
     var title = $('autoSignTitle');
     var meta = $('autoSignMeta');
     var box = $('autoSignEvents');
+    var quickBtn = $('autoSignQuickBtn');
     var active = !!(d.cxAutoSign || d.yktAutoSign);
+    var st = d.stats || {};
 
     if (dot) {
       dot.className = 'dot' + (active ? ' ok' : '');
     }
     if (title) {
-      title.textContent = active ? '自动签到守护：运行中' : '自动签到守护：待机';
+      var suffix = active ? '已开启' : '未开启';
+      if (st.needAction) { suffix += '（' + st.needAction + ' 条待人工）'; }
+      title.textContent = '自动签到守护：' + suffix;
     }
     if (meta) {
-      var st = d.stats || {};
       var parts = [
         '学习通：' + (d.cxAutoSign ? '开' : '关'),
         '雨课堂：' + (d.yktAutoSign ? '开' : '关'),
@@ -557,12 +573,28 @@
         '已签 ' + (st.signed || 0)
       ];
       if (st.imTriggered) { parts.push('IM 秒签 ' + st.imTriggered); }
-      if (st.needAction) { parts.push('待人工 ' + st.needAction); }
       if (d.webhookConfigured) { parts.push('推送已配'); }
       meta.textContent = parts.join(' · ');
     }
 
     var events = d.events || [];
+    asQuickEvent = null;
+    for (var k = 0; k < events.length; k++) {
+      if (events[k].status === 'need_action' && events[k].refId) {
+        asQuickEvent = events[k];
+        break;
+      }
+    }
+    if (quickBtn) {
+      if (asQuickEvent) {
+        quickBtn.hidden = false;
+        quickBtn.textContent = (asQuickEvent.detail && asQuickEvent.detail.indexOf('验证码') >= 0)
+          ? '去验证' : '手动签到';
+      } else {
+        quickBtn.hidden = true;
+      }
+    }
+
     if (events.length && events[0].id > asLastId) {
       if (asLastId > 0) {
         var latest = events[0];
@@ -580,9 +612,7 @@
     if (!events.length) {
       var empty = document.createElement('p');
       empty.className = 'autosign-empty';
-      empty.textContent = active
-        ? '守护线程运行中，等待 IM 通知或下一轮低频巡检。'
-        : '在「设置」中开启学习通或雨课堂自动签到后，这里会实时记录秒签与巡检结果。';
+      empty.textContent = active ? '暂无记录，等待 IM 通知或巡检。' : '暂无记录。';
       box.appendChild(empty);
       return;
     }
@@ -624,20 +654,8 @@
         var actBtn = document.createElement('button');
         actBtn.type = 'button';
         actBtn.className = 'autosign-act-btn';
-        if (ev.platform === 'cx') {
-          actBtn.textContent = (ev.detail && ev.detail.indexOf('验证码') >= 0) ? '去验证' : '手动签到';
-          actBtn.addEventListener('click', function () {
-            if (window.HFUTCx && window.HFUTCx.signById) {
-              window.HFUTCx.signById(ev.refId, ev.item || null);
-            }
-          });
-        } else if (ev.platform === 'ykt') {
-          actBtn.textContent = '去处理';
-          actBtn.addEventListener('click', function () {
-            var tabYkt = $('tabYkt');
-            if (tabYkt) { tabYkt.click(); }
-          });
-        }
+        actBtn.textContent = (ev.detail && ev.detail.indexOf('验证码') >= 0) ? '去验证' : '手动签到';
+        actBtn.addEventListener('click', function () { openNeedAction(ev); });
         row.appendChild(actBtn);
       }
       box.appendChild(row);
@@ -652,6 +670,22 @@
   }
 
   if (asPanel) {
+    var toggleBtn = $('autoSignToggleBtn');
+    var drawer = $('autoSignDrawer');
+    if (toggleBtn && drawer) {
+      toggleBtn.addEventListener('click', function () {
+        var open = drawer.hidden;
+        drawer.hidden = !open;
+        toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        toggleBtn.textContent = open ? '收起 ▴' : '记录 ▾';
+      });
+    }
+    var quickBtn0 = $('autoSignQuickBtn');
+    if (quickBtn0) {
+      quickBtn0.addEventListener('click', function () {
+        if (asQuickEvent) { openNeedAction(asQuickEvent); }
+      });
+    }
     var clearBtn = $('autoSignClearBtn');
     if (clearBtn) {
       clearBtn.addEventListener('click', function () {

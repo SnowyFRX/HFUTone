@@ -1398,16 +1398,15 @@ body.is-side-drag .side > .side-shell { transition: none; }
   filter: drop-shadow(0 0 1px rgba(0, 0, 0, .5));
 }
 
-/* ---------------------------------------------- 自动签到守护状态卡片 */
-.autosign-card {
-  margin-top: var(--s3);
-  padding: var(--s3);
-  border-radius: var(--r-md);
-  border: 1px solid var(--hairline);
+/* ---------------------------------------------- 自动签到守护单行状态条 */
+.autosign-bar {
+  flex: none;
+  padding: 7px var(--s5);
+  border-top: 1px solid var(--hairline);
   background: var(--tint-4);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .autosign-head {
@@ -1415,40 +1414,72 @@ body.is-side-drag .side > .side-shell { transition: none; }
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .autosign-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.autosign-title strong {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .autosign-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
+  flex: none;
 }
 
 .autosign-actions button {
-  font-size: 11.5px;
-  padding: 3px 9px;
-  min-height: 26px;
+  font-size: 11px;
+  padding: 2px 8px;
+  min-height: 22px;
+}
+
+.autosign-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--hairline);
+}
+
+.autosign-drawer[hidden] { display: none !important; }
+
+.autosign-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.autosign-drawer-head button {
+  font-size: 11px;
+  padding: 1px 7px;
+  min-height: 20px;
 }
 
 .autosign-meta {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--muted);
   font-family: var(--font-mono);
 }
 
 .autosign-events {
-  max-height: 160px;
+  max-height: 120px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .autosign-empty {
