@@ -1398,4 +1398,129 @@ body.is-side-drag .side > .side-shell { transition: none; }
   filter: drop-shadow(0 0 1px rgba(0, 0, 0, .5));
 }
 
+/* ---------------------------------------------- 自动签到守护状态卡片 */
+.autosign-card {
+  margin-top: var(--s3);
+  padding: var(--s3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: var(--tint-4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.autosign-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.autosign-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.autosign-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.autosign-actions button {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  min-height: 26px;
+}
+
+.autosign-meta {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.autosign-events {
+  max-height: 160px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.autosign-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.autosign-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm, 6px);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+}
+
+.autosign-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  background: var(--tint-4);
+  color: var(--muted);
+}
+
+.autosign-badge.is-signed {
+  background: rgba(39, 134, 80, 0.14);
+  color: #1f7a46;
+}
+
+.autosign-badge.is-need {
+  background: rgba(198, 128, 18, 0.16);
+  color: #9c6208;
+}
+
+.autosign-badge.is-fail {
+  background: rgba(178, 60, 60, 0.14);
+  color: #b23c3c;
+}
+
+.autosign-row-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.autosign-row-head {
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.autosign-row-detail {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.autosign-test-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.autosign-test-msg {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 #cxCapSlice:active { cursor: grabbing; }

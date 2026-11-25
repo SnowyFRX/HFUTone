@@ -44,17 +44,24 @@
     if ($('setStudent')) { $('setStudent').checked = !!st.student; }
     if ($('setPpt')) { $('setPpt').checked = !!st.ppt; }
 
-    // 雨课堂签到通道：三选一
-    var mode = ((s.ykt || {}).signMode || 'both');
+    // 雨课堂签到通道与自动签到
+    var yktcfg = (s.ykt || {});
+    var mode = (yktcfg.signMode || 'both');
     ['both', 'scan', 'app'].forEach(function (m) {
       var el = $('setSign' + m.charAt(0).toUpperCase() + m.slice(1));
       if (el) { el.checked = (m === mode); }
     });
+    if ($('setYktAutoSign')) { $('setYktAutoSign').checked = !!yktcfg.autoSign; }
 
     // 学习通签到自动化
     var cxcfg = (s.cx || {});
     if ($('setCxAutoScan')) { $('setCxAutoScan').checked = cxcfg.autoScan !== false; }
     if ($('setCxAutoSign')) { $('setCxAutoSign').checked = !!cxcfg.autoSign; }
+
+    // 自动签到调度与 Webhook 推送
+    var acfg = (s.autoSign || {});
+    if ($('setAutoPollSec')) { $('setAutoPollSec').value = String(acfg.pollIntervalSec || 180); }
+    if ($('setAutoWebhook')) { $('setAutoWebhook').value = acfg.webhookUrl || ''; }
 
     // 学习通位置签到的默认坐标
     var loc = ((s.cx || {}).location || {});
@@ -79,6 +86,7 @@
       if (d && d.ok) {
         fillSettings(d.settings);
         if (window.cxApplySettings) { window.cxApplySettings(d.settings); }
+        if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
         $('settingsMsg').textContent = note || '';
         setTimeout(function () { $('settingsMsg').textContent = ''; }, 1600);
       } else {
@@ -134,6 +142,12 @@
       });
     });
 
+    if ($('setYktAutoSign')) {
+      $('setYktAutoSign').addEventListener('change', function () {
+        saveSettings({ ykt: { autoSign: this.checked } },
+          this.checked ? '已开启雨课堂自动签到' : '已关闭雨课堂自动签到');
+      });
+    }
     if ($('setCxAutoScan')) {
       $('setCxAutoScan').addEventListener('change', function () {
         saveSettings({ cx: { autoScan: this.checked } },
@@ -142,8 +156,58 @@
     }
     if ($('setCxAutoSign')) {
       $('setCxAutoSign').addEventListener('change', function () {
-        saveSettings({ cx: { autoSign: this.checked } },
-          this.checked ? '已开启自动签到（刷新出来立刻提交）' : '已关闭自动签到');
+        var on = this.checked;
+        saveSettings({ cx: { autoSign: on } },
+          on ? '已开启学习通自动签到（IM 秒签 + 低频兜底）' : '已关闭学习通自动签到');
+        if (on && window.HFUToneIM) {
+          try { window.HFUToneIM.connect(false); } catch (e) { /* 忽略 */ }
+        }
+      });
+    }
+
+    var autoCfgTimer = null;
+    if ($('setAutoPollSec')) {
+      $('setAutoPollSec').addEventListener('change', function () {
+        var sec = parseInt(this.value, 10);
+        if (!isFinite(sec)) { sec = 180; }
+        sec = Math.max(60, Math.min(600, sec));
+        this.value = String(sec);
+        saveSettings({ autoSign: { pollIntervalSec: sec } },
+          '低频轮询间隔已设为 ' + sec + ' 秒');
+      });
+    }
+    if ($('setAutoWebhook')) {
+      var saveWebhook = function () {
+        var u = ($('setAutoWebhook').value || '').trim();
+        if (u && !/^https?:\/\//i.test(u)) {
+          var m = $('webhookTestMsg');
+          if (m) { m.textContent = '地址需以 http:// 或 https:// 开头'; }
+          return;
+        }
+        saveSettings({ autoSign: { webhookUrl: u } },
+          u ? 'Webhook 推送地址已保存' : '已清除 Webhook 推送地址');
+      };
+      $('setAutoWebhook').addEventListener('input', function () {
+        if (autoCfgTimer) { clearTimeout(autoCfgTimer); }
+        autoCfgTimer = setTimeout(saveWebhook, 600);
+      });
+      $('setAutoWebhook').addEventListener('change', saveWebhook);
+    }
+    if ($('btnTestWebhook')) {
+      $('btnTestWebhook').addEventListener('click', function () {
+        var btn = this;
+        var msg = $('webhookTestMsg');
+        var u = $('setAutoWebhook') ? $('setAutoWebhook').value.trim() : '';
+        btn.disabled = true;
+        if (msg) { msg.textContent = '发送中…'; }
+        api('/api/autosign/test_webhook', { url: u }).then(function (d) {
+          btn.disabled = false;
+          if (msg) {
+            msg.textContent = (d && d.ok)
+              ? ('推送成功（' + (d.detail || 'OK') + '）')
+              : ('推送失败：' + ((d && d.detail) || '未知错误'));
+          }
+        });
       });
     }
 
@@ -466,5 +530,134 @@
     setInterval(poll, 3000);
   }
 
+  /* ------------------------------------------------ 自动签到守护状态面板 */
+  var asPanel = $('autoSignPanel');
+  var asLastId = 0;
+
+  function renderAutoSign(d) {
+    if (!asPanel || !d || d.ok === false) { return; }
+    var dot = $('autoSignDot');
+    var title = $('autoSignTitle');
+    var meta = $('autoSignMeta');
+    var box = $('autoSignEvents');
+    var active = !!(d.cxAutoSign || d.yktAutoSign);
+
+    if (dot) {
+      dot.className = 'dot' + (active ? ' ok' : '');
+    }
+    if (title) {
+      title.textContent = active ? '自动签到守护：运行中' : '自动签到守护：待机';
+    }
+    if (meta) {
+      var st = d.stats || {};
+      var parts = [
+        '学习通：' + (d.cxAutoSign ? '开' : '关'),
+        '雨课堂：' + (d.yktAutoSign ? '开' : '关'),
+        '兜底 ' + (d.pollIntervalSec || 180) + 's',
+        '已签 ' + (st.signed || 0)
+      ];
+      if (st.imTriggered) { parts.push('IM 秒签 ' + st.imTriggered); }
+      if (st.needAction) { parts.push('待人工 ' + st.needAction); }
+      if (d.webhookConfigured) { parts.push('推送已配'); }
+      meta.textContent = parts.join(' · ');
+    }
+
+    var events = d.events || [];
+    if (events.length && events[0].id > asLastId) {
+      if (asLastId > 0) {
+        var latest = events[0];
+        if (latest.status === 'signed') {
+          toast('[' + latest.trigger + '] 已签到：' + latest.name, 'ok');
+        } else if (latest.status === 'need_action') {
+          toast('需人工处理：' + latest.name + '（' + latest.detail + '）');
+        }
+      }
+      asLastId = events[0].id;
+    }
+
+    if (!box) { return; }
+    box.textContent = '';
+    if (!events.length) {
+      var empty = document.createElement('p');
+      empty.className = 'autosign-empty';
+      empty.textContent = active
+        ? '守护线程运行中，等待 IM 通知或下一轮低频巡检。'
+        : '在「设置」中开启学习通或雨课堂自动签到后，这里会实时记录秒签与巡检结果。';
+      box.appendChild(empty);
+      return;
+    }
+    var statusMap = {
+      signed: ['已签', 'is-signed'],
+      already: ['已签', 'is-signed'],
+      need_action: ['需人工', 'is-need'],
+      failed: ['失败', 'is-fail'],
+      info: ['记录', '']
+    };
+    var platMap = { cx: '学习通', ykt: '雨课堂', system: '系统' };
+
+    events.slice(0, 12).forEach(function (ev) {
+      var row = document.createElement('div');
+      row.className = 'autosign-row';
+      var info = statusMap[ev.status] || ['记录', ''];
+
+      var badge = document.createElement('span');
+      badge.className = 'autosign-badge ' + info[1];
+      badge.textContent = info[0];
+
+      var body = document.createElement('div');
+      body.className = 'autosign-row-body';
+
+      var head = document.createElement('div');
+      head.className = 'autosign-row-head';
+      head.textContent = (ev.time || '') + ' · ' + (platMap[ev.platform] || ev.platform)
+        + ' · ' + (ev.trigger || '轮询') + ' · ' + (ev.name || '');
+
+      var det = document.createElement('div');
+      det.className = 'autosign-row-detail';
+      det.textContent = ev.detail || '';
+
+      body.appendChild(head);
+      if (ev.detail) { body.appendChild(det); }
+      row.appendChild(badge);
+      row.appendChild(body);
+      box.appendChild(row);
+    });
+  }
+
+  function refreshAutoSignState() {
+    if (!asPanel) { return Promise.resolve(); }
+    return api('/api/autosign/state').then(function (d) {
+      renderAutoSign(d);
+    });
+  }
+
+  if (asPanel) {
+    var nowBtn = $('autoSignNowBtn');
+    if (nowBtn) {
+      nowBtn.addEventListener('click', function () {
+        nowBtn.disabled = true;
+        nowBtn.textContent = '检查中…';
+        api('/api/autosign/trigger', { platform: 'all' }).then(function (d) {
+          nowBtn.disabled = false;
+          nowBtn.textContent = '立即检查';
+          if (d && d.state) { renderAutoSign(d.state); }
+          else { refreshAutoSignState(); }
+        });
+      });
+    }
+    var clearBtn = $('autoSignClearBtn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        api('/api/autosign/clear', {}).then(function (d) {
+          if (d && d.state) { renderAutoSign(d.state); }
+          else { refreshAutoSignState(); }
+        });
+      });
+    }
+    refreshAutoSignState();
+    setInterval(refreshAutoSignState, 12000);
+  }
+
+  window.refreshAutoSignState = refreshAutoSignState;
   window.HFUTLivePpt = { openSettings: openSettings, poll: poll };
 })();
