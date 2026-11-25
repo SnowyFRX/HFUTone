@@ -94,8 +94,17 @@
     if (!conn || !groups.length) { return; }
     var queue = groups.slice(0, 20);
     var idx = 0;
+    var allActs = [];
     function next() {
-      if (idx >= queue.length) { log('漫游拉取完成'); return; }
+      if (idx >= queue.length) {
+        if (allActs.length) {
+          log('漫游拉取完成，共合并 ' + allActs.length + ' 条群聊签到');
+          report(allActs, false);
+        } else {
+          log('漫游拉取完成');
+        }
+        return;
+      }
       var g = queue[idx++];
       try {
         conn.fetchHistoryMessages({
@@ -103,15 +112,10 @@
           isGroup: true,
           count: 20,
           success: function (list) {
-            var acts = [];
             (list || []).forEach(function (m) {
               var a = pickActivity(m);
-              if (a) { acts.push(a); }
+              if (a) { allActs.push(a); }
             });
-            if (acts.length) {
-              log(g.groupId + ' 拉到 ' + acts.length + ' 条活动');
-              report(acts, false);
-            }
             next();
           },
           fail: function (e) {

@@ -176,6 +176,8 @@ class CxSigner:
         self.extra_courses: list[dict] = []
         # cpi 现查缓存：courseId|classId -> cpi
         self._cpi_cache: dict[str, str] = {}
+        # 已确认过期或已签的群聊历史活动，后续扫描不再重复查 active_info + attend_info
+        self._dead_chat_ids: set[str] = set()
 
     # -- 账号 --------------------------------------------------------------
 
@@ -257,7 +259,7 @@ class CxSigner:
 
         try:
             from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=6) as pool:
+            with ThreadPoolExecutor(max_workers=10) as pool:
                 results = list(pool.map(_one, courses))
         except ImportError:                                # 极老环境兜底
             results = [_one(c) for c in courses]
@@ -322,22 +324,50 @@ class CxSigner:
         """
         out: list[dict] = []
         # 前端 Web SDK 推上来的活动（唯一能拿到群消息的途径）
-        for it in list(_CHAT_SIGNS):
-            course = {'courseId': it.get('courseId') or '',
-                      'classId': it.get('classId') or '',
-                      'cpi': '', 'name': it.get('courseName') or '',
-                      'teacher': '', 'manual': False, 'inactive': False}
-            act = {'activeId': it['activeId'], 'name': it.get('title') or '签到',
-                   'desc': it.get('desc') or '', 'url': it.get('url') or '',
-                   'startTime': 0, 'endTime': 0, 'signType': '', 'status': 0}
-            try:
-                item = self._describe(course, act)
-            except Exception as exc:                       # noqa: BLE001
-                core.log(f'[群聊] 活动 {it["activeId"]} 解析失败：{exc}')
-                continue
-            item['fromChat'] = True
-            out.append(item)
-        if out:
+        chat_items = list(_CHAT_SIGNS)
+        if chat_items:
+            with self._lock:
+                pending = [it for it in chat_items
+                           if str(it.get('activeId') or '') not in self._dead_chat_ids]
+
+            def _one_chat(it: dict):
+                course = {'courseId': it.get('courseId') or '',
+                          'classId': it.get('classId') or '',
+                          'cpi': '', 'name': it.get('courseName') or '',
+                          'teacher': '', 'manual': False, 'inactive': False}
+                act = {'activeId': it['activeId'], 'name': it.get('title') or '签到',
+                       'desc': it.get('desc') or '', 'url': it.get('url') or '',
+                       'startTime': 0, 'endTime': 0, 'signType': '', 'status': 0}
+                try:
+                    item = self._describe(course, act)
+                except Exception as exc:                   # noqa: BLE001
+                    core.log(f'[群聊] 活动 {it["activeId"]} 解析失败：{exc}')
+                    return None
+                item['fromChat'] = True
+                return item
+
+            if pending:
+                try:
+                    from concurrent.futures import ThreadPoolExecutor
+                    with ThreadPoolExecutor(max_workers=8) as pool:
+                        described = list(pool.map(_one_chat, pending))
+                except ImportError:                        # 极老环境兜底
+                    described = [_one_chat(it) for it in pending]
+                now_ms = time.time() * 1000
+                dead: list[str] = []
+                for item in described:
+                    if not item:
+                        continue
+                    end_ts = cx._int(item.get('endTime'), 0)
+                    is_expired = bool(end_ts) and now_ms > end_ts
+                    if is_expired or item.get('signed'):
+                        dead.append(str(item.get('activeId') or ''))
+                        continue
+                    out.append(item)
+                if dead:
+                    with self._lock:
+                        self._dead_chat_ids.update(d for d in dead if d)
+            # 只要 Web SDK 已经有数据，绝不回落到必 404 的 REST 拉取
             return out
         im = (self.api.store.get_user() or {}).get('imAccount') or {}
         user = str(im.get('userName') or '')
@@ -397,11 +427,13 @@ class CxSigner:
             sign_type = cx._sign_type_from_index(cx._int(info.get('otherId')))
         sign_type = sign_type or 'normal'
 
-        attend = {}
-        try:
-            attend = self.api.attend_info(aid)
-        except Exception:                                  # noqa: BLE001
-            pass
+        attend = act.get('_attend') if isinstance(act.get('_attend'), dict) else None
+        if attend is None:
+            attend = {}
+            try:
+                attend = self.api.attend_info(aid)
+            except Exception:                              # noqa: BLE001
+                pass
         status = cx._int(attend.get('status'), 0)
 
         need_captcha = cx._int(info.get('showVCode')) == 1

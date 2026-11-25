@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.parse
 import uuid as _uuid
@@ -213,6 +214,14 @@ class Cx:
         self.cookie = self.store.get_cookie()
         self.unique_id = self.store.get_unique_id()
         self.headers = build_headers(self.unique_id)
+        self._jt_lock = threading.Lock()
+        try:
+            cached = self.store.read().get('joinTimes')
+            self._join_time_cache: dict[str, str] = (
+                dict(cached) if isinstance(cached, dict) else {}
+            )
+        except Exception:                                     # noqa: BLE001
+            self._join_time_cache = {}
         u = self.store.get_user()
         self.uid = str(u.get('uid') or '')
         self.name = str(u.get('name') or '')
@@ -459,7 +468,15 @@ class Cx:
         return out
 
     def join_class_time(self, course_id: str, class_id: str, cpi: str) -> str:
-        """进班时间。taskactivelist 把它当必填参数，缺了拿不到列表。"""
+        """进班时间。taskactivelist 把它当必填参数，缺了拿不到列表。
+
+        同一门班级的进班时间是静态属性，内存 + cx.json 缓存后不再每次扫描重复查。
+        """
+        key = f'{self.uid}|{course_id}|{class_id}'
+        with self._jt_lock:
+            hit = self._join_time_cache.get(key)
+        if hit is not None:
+            return hit
         r = self._get(MOOC_API + '/gas/clazzperson', {
             'courseid': course_id, 'clazzid': class_id, 'userid': self.uid,
             'personid': cpi, 'view': 'json',
@@ -467,9 +484,20 @@ class Cx:
         })
         d = self._json(r)
         data = d.get('data') or []
+        val = ''
         if isinstance(data, list) and data and isinstance(data[0], dict):
-            return str(data[0].get('createtime') or '')
-        return ''
+            val = str(data[0].get('createtime') or '')
+        if val:
+            with self._jt_lock:
+                self._join_time_cache[key] = val
+                snap = dict(self._join_time_cache)
+            try:
+                blob = self.store.read()
+                blob['joinTimes'] = snap
+                self.store.write(blob)
+            except Exception:                                 # noqa: BLE001
+                pass
+        return val
 
     def _sign_enc_params(self, params: dict) -> dict:
         """给一组参数补上 inf_enc 那套校验字段。"""
@@ -504,41 +532,50 @@ class Cx:
         }
         app_params.update(self._sign_enc_params(app_params))
         r1 = self._get(MOBILE + '/ppt/activeAPI/taskactivelist', app_params)
-
-        r2 = self._get(MOBILE + '/v2/apis/active/student/activelist', {
-            'fid': '0', 'courseId': course_id, 'classId': class_id,
-            'showNotStartedActive': '0',
-            '_': str(int(time.time() * 1000)),
-        })
-
         d1 = self._json(r1)
-        d2 = self._json(r2)
         now = time.time() * 1000
+
+        def _is_in_window(a: dict) -> bool:
+            t = _int(a.get('activeType'), 0)
+            if t not in (2, 74, 54):
+                return False
+            start = _int(a.get('startTime'), 0)
+            end = _int(a.get('endTime'), 0)
+            st = _int(a.get('status'), 0)
+            if not start:
+                return False
+            if end:
+                return start <= now <= end
+            return (st == 1) and (start <= now)
+
+        d1_list = d1.get('activeList') or [] if isinstance(d1, dict) else []
+        d1_valid = isinstance(d1, dict) and ('activeList' in d1 or 'groupList' in d1)
+        has_live_in_d1 = any(isinstance(a, dict) and _is_in_window(a) for a in d1_list)
+
+        # 只有第一路查到进行中签到（需补 Web 路 nameFour/endTime）或第一路异常时，
+        # 才补打第二路 student/activelist；绝大多数无签到的课直接省掉 1 次 RTT。
+        if has_live_in_d1 or not d1_valid:
+            r2 = self._get(MOBILE + '/v2/apis/active/student/activelist', {
+                'fid': '0', 'courseId': course_id, 'classId': class_id,
+                'showNotStartedActive': '0',
+                '_': str(int(time.time() * 1000)),
+            })
+            d2 = self._json(r2)
+        else:
+            d2 = {}
+
         merged: dict[str, dict] = {}
-        for a in ((d1.get('activeList') or []) + ((d2.get('data') or {}).get('activeList') or [])):
+        for a in (d1_list + ((d2.get('data') or {}).get('activeList') or [])):
             if not isinstance(a, dict):
                 continue
             aid = str(a.get('id') or '')
             if not aid:
                 continue
-            t = _int(a.get('activeType'), 0)
-            if t not in (2, 74, 54):
+            if not _is_in_window(a):
                 continue
+            t = _int(a.get('activeType'), 0)
             start = _int(a.get('startTime'), 0)
             end = _int(a.get('endTime'), 0)
-            st = _int(a.get('status'), 0)
-            # 窗口判进行中。endTime 有就用窗口；没有（部分活动不给
-            # endTime，实测商益学的老位置签到就是 0）只能信 status：
-            # 1=进行中、2=已结束。早先「没 endTime 就当进行中」会把
-            # 一堆早已截止的历史签到全放进来。
-            if not start:
-                continue
-            if end:
-                in_window = start <= now <= end
-            else:
-                in_window = (st == 1) and (start <= now)
-            if not in_window:
-                continue
             row = merged.get(aid)
             if row is None:
                 merged[aid] = {
@@ -577,6 +614,7 @@ class Cx:
                 pass
             if _int(attend.get('status'), 0) == 1:
                 continue
+            row['_attend'] = attend
             out.append(row)
         return out
 
