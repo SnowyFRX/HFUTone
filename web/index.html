@@ -44,7 +44,7 @@
 })();
 </script>
 <link rel="stylesheet" href="app.css?v=2026.11.25.7">
-<link rel="stylesheet" href="ykt.css?v=2026.11.25.9">
+<link rel="stylesheet" href="ykt.css?v=2026.11.25.10">
 <link rel="stylesheet" href="mobile.css?v=2026.11.25.7">
 </head>
 <body>
@@ -403,14 +403,14 @@
       <div class="set-group">
         <p class="set-title">学习通位置签到坐标</p>
         <p class="set-hint">
-          签到只有几秒窗口，坐标得提前配好。经纬度去
-          <a href="https://lbs.qq.com/getPoint/" id="setCxPick" target="_blank" rel="noopener">腾讯坐标拾取器</a>
-          点一下地图复制，保留到小数点后 6 位。
+          签到只有几秒窗口，坐标得提前配好。打开<b>腾讯坐标拾取器</b>点一下地图复制经纬度，
+          保留到小数点后 6 位。桌面版直接复制下面那行地址到浏览器打开：
         </p>
         <p class="set-url"><code>https://lbs.qq.com/getPoint/</code></p>
+        <p class="set-hint set-url-android" hidden>手机上可直接点：<a href="https://lbs.qq.com/getPoint/" id="setCxPick" target="_blank" rel="noopener">在浏览器打开</a></p>
         <label class="cx-field">
           <span>地点描述</span>
-          <input type="text" id="setCxAddress" spellcheck="false" placeholder="翡翠湖校区 · 西二302">
+          <input type="text" id="setCxAddress" spellcheck="false" placeholder="屯溪路校区 · 西二302">
         </label>
         <div class="cx-row2">
           <label class="cx-field">
@@ -466,9 +466,9 @@
 <script src="ascii-sharks.bundle.js?v=2026.11.16.7"></script>
 <script src="app.js?v=2026.11.25.1"></script>
 <script src="ykt.js?v=2026.11.25.5"></script>
-<script src="cx.js?v=2026.11.25.6"></script>
+<script src="cx.js?v=2026.11.25.10"></script>
 <script src="im.js?v=2026.11.25.6"></script>
-<script src="ppt.js?v=2026.11.25.9"></script>
+<script src="ppt.js?v=2026.11.25.10"></script>
 <script>
 /* HTML 与业务脚本版本不一致时只重载一次；NoCache + no-store 保证拿到新资源。 */
 (function () {
@@ -485,6 +485,6 @@
   }
 })();
 </script>
-<script src="mobile.js?v=2026.11.24.5"></script>
+<script src="mobile.js?v=2026.11.25.10"></script>
 </body>
 </html>

@@ -386,7 +386,7 @@
       }
       if (needs.indexOf('位置') >= 0) {
         paintState();
-        askInput('位置', '位置签到要地址和坐标。按「地址,纬度,经度」填，例如 翡翠湖校区,31.86,117.28。',
+        askInput('位置', '位置签到要地址和坐标。按「地址,纬度,经度」填，例如 屯溪路校区,31.86,117.28。',
           '地址,纬度,经度', function (v) {
             var parts = v.split(',');
             if (parts.length < 3) { toast('格式不对', 'warn'); return; }

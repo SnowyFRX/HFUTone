@@ -23,6 +23,9 @@
   var body = document.body;
   if (body) {
     body.classList.add('is-android');
+  // 设置里的坐标拾取器：桌面只给可复制的地址，安卓额外给一个能点的链接
+  var urlRow = document.querySelector('.set-url-android');
+  if (urlRow) { urlRow.hidden = false; }
   }
 
   function $(id) { return document.getElementById(id); }

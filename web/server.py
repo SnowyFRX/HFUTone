@@ -1733,22 +1733,6 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/cx/'):
             self._cx_get(path)
             return
-        if path == '/api/open-url':
-            # 只在桌面版有意义：用系统默认浏览器打开一个外部链接。
-            # QtWebEngine 不处理 target=_blank，安卓 WebView 也没有浏览器可调，
-            # 所以统一走这里，失败就让前端提示手动复制。
-            url = str(body.get('url') or '').strip()
-            if not url.lower().startswith(('http://', 'https://')):
-                self._json({'ok': False, 'error': '只允许 http(s) 链接'})
-                return
-            try:
-                import webbrowser
-                opened = webbrowser.open(url, new=2)
-                self._json({'ok': bool(opened)})
-            except Exception as e:                   # noqa: BLE001
-                self._json({'ok': False, 'error': friendly_error(e)})
-            return
-
         if path == '/api/settings':
             self._json({'ok': True, 'settings': read_settings()})
             return
