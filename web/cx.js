@@ -315,6 +315,117 @@
   }
 
   /* --------------------------------------------------------- 签到与补输入 */
+
+  /* ---------------------------------------------------- 滑块验证码
+     学习通的 showVCode=1 要求先过 captcha.chaoxing.com 的滑块，换到 validate
+     才允许签到。取图/验图都走后端（图片要用 Referer，前端跨域拿不到）。
+
+     x 的算法照 course_helper：把拖到的位置换算成设计稿坐标，再乘 280/264 减 8，
+     得到缺口左边界（原图像素）。 */
+  var CAP = { token: "", iv: "", ts: 0, referer: "", onOk: null, x: 0, dragging: false };
+
+  function capReset() {
+    var slice = $("cxCapSlice");
+    if (slice) { slice.style.left = "0px"; }
+    CAP.x = 0;
+    var msg = $("cxCapMsg");
+    if (msg) { msg.textContent = ""; msg.className = "err-line"; }
+  }
+
+  function capLoad() {
+    capReset();
+    var bg = $("cxCapBg");
+    var slice = $("cxCapSlice");
+    if (bg) { bg.removeAttribute("src"); }
+    if (slice) { slice.removeAttribute("src"); }
+    var msg = $("cxCapMsg");
+    if (msg) { msg.textContent = "正在取验证码…"; }
+    api("/api/cx/captcha/start?referer=" + encodeURIComponent(CAP.referer)).then(function (d) {
+      if (!d || !d.ok) {
+        if (msg) { msg.textContent = (d && d.error) || "取验证码失败"; }
+        return;
+      }
+      CAP.token = d.token; CAP.iv = d.iv; CAP.ts = d.ts;
+      CAP.originalWidth = d.width || 320;
+      if (bg) { bg.src = d.bg; }
+      if (slice) { slice.src = d.slice; }
+      if (msg) { msg.textContent = ""; }
+    }).catch(function (e) {
+      if (msg) { msg.textContent = "取验证码失败：" + e; }
+    });
+  }
+
+  function capShow() {
+    var b = $("cxCapBackdrop");
+    if (b) { b.classList.add("open"); }
+  }
+
+  function capHide() {
+    var b = $("cxCapBackdrop");
+    if (b) { b.classList.remove("open"); }
+  }
+
+  function capOpen(referer, onOk) {
+    CAP.referer = referer || "https://mobilelearn.chaoxing.com/";
+    CAP.onOk = onOk;
+    capShow();
+    capLoad();
+  }
+
+  function capDragStart(e) {
+    CAP.dragging = true;
+    CAP.startX = e.clientX != null ? e.clientX : (e.touches && e.touches[0].clientX) || 0;
+    CAP.baseLeft = parseFloat(($("cxCapSlice") || {}).style.left) || 0;
+  }
+
+  function capDragMove(e) {
+    if (!CAP.dragging) { return; }
+    var stage = $("cxCapStage");
+    var slice = $("cxCapSlice");
+    if (!stage || !slice) { return; }
+    var cx0 = e.clientX != null ? e.clientX : (e.touches && e.touches[0].clientX) || 0;
+    var maxLeft = stage.clientWidth - slice.clientWidth;
+    var left = Math.max(0, Math.min(maxLeft, CAP.baseLeft + (cx0 - CAP.startX)));
+    slice.style.left = left + "px";
+    CAP.x = left;
+    if (e.cancelable) { e.preventDefault(); }
+  }
+
+  function capDragEnd() { CAP.dragging = false; }
+
+  function capSubmit() {
+    var stage = $("cxCapStage");
+    var slice = $("cxCapSlice");
+    var msg = $("cxCapMsg");
+    if (!stage || !slice || !CAP.token) {
+      if (msg) { msg.textContent = "验证码还没加载好"; }
+      return;
+    }
+    var left = parseFloat(slice.style.left) || 0;
+    // course_helper 的公式，一步不少：
+    //   显示位置 -> 设计稿(320 宽) -> 缺口左边界(乘 280/264 再减 8) -> 原图坐标(乘 originalWidth/320)
+    var design = left * (320 / stage.clientWidth);
+    var cutout = design * (280 / 264) - 8;
+    var ow = CAP.originalWidth || 320;
+    var x = cutout * (ow / 320);
+    if (x < 0) { x = 0; }
+    if (msg) { msg.textContent = "正在验证…"; }
+    api("/api/cx/captcha/verify", {
+      x: Math.round(x), token: CAP.token, iv: CAP.iv, ts: CAP.ts, referer: CAP.referer
+    }).then(function (d) {
+      if (d && d.ok && d.validate) {
+        capHide();
+        var cb = CAP.onOk; CAP.onOk = null;
+        if (cb) { cb(d.validate); }
+      } else {
+        if (msg) { msg.textContent = (d && d.error) || "验证没通过，换一张再试"; }
+        capLoad();
+      }
+    }).catch(function (e) {
+      if (msg) { msg.textContent = "验证失败：" + e; }
+    });
+  }
+
   function askInput(kind, lead, placeholder, onOk, onImage) {
     if (!$('cxInputBackdrop')) { return; }
     $('cxInputTitle').textContent = '补充' + kind;
@@ -371,6 +482,13 @@
   }
 
   function signOne(item, extra) {
+    // 已知需要滑块验证码的项：先弹滑块，避免白提交一次换来「环境异常」
+    if (item && item.needCaptcha && !(extra && extra.validate)) {
+      capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (v) {
+        signOne(item, { validate: v, enc: (extra && extra.enc) || '' });
+      });
+      return Promise.resolve({ ok: false, status: 'need' });
+    }
     S.busy = true;
     paintState();
     var payload = { item: item };
@@ -434,10 +552,10 @@
       }
       if (needs.indexOf('验证码') >= 0) {
         paintState();
-        askInput('验证码', '老师开了防作弊，需要图形验证码。填服务端给的验证串。',
-          'validate', function (v) {
-            signOne(item, { validate: v, enc: (d && d.enc2) || '' });
-          });
+        // 学习通的验证码是滑块，不是手填字符串：取图 → 拖动 → 换 validate → 重交
+        capOpen(item.url || 'https://mobilelearn.chaoxing.com/', function (validate) {
+          signOne(item, { validate: validate, enc: (d && d.enc2) || '' });
+        });
         return;
       }
       if (needs.indexOf('位置') >= 0) {
@@ -506,6 +624,20 @@
     }
 
     if ((el = $('cxScanBtn'))) { el.addEventListener('click', doScan); }
+    if ((el = $('cxCapSubmit'))) { el.addEventListener('click', capSubmit); }
+    if ((el = $('cxCapRetry'))) { el.addEventListener('click', capLoad); }
+    if ((el = $('cxCapCancel'))) {
+      el.addEventListener('click', function () {
+        CAP.onOk = null;
+        capHide();
+      });
+    }
+    if ((el = $('cxCapSlice'))) {
+      el.addEventListener('pointerdown', capDragStart);
+      el.addEventListener('pointermove', capDragMove);
+      el.addEventListener('pointerup', capDragEnd);
+      el.addEventListener('pointercancel', capDragEnd);
+    }
     if ((el = $('cxSignAll'))) { el.addEventListener('click', signAll); }
 
     if ((el = $('cxLogout'))) {

@@ -44,7 +44,7 @@
 })();
 </script>
 <link rel="stylesheet" href="app.css?v=2026.11.25.7">
-<link rel="stylesheet" href="ykt.css?v=2026.11.25.14">
+<link rel="stylesheet" href="ykt.css?v=2026.11.25.19">
 <link rel="stylesheet" href="mobile.css?v=2026.11.25.14">
 </head>
 <body>
@@ -209,6 +209,8 @@
             <button class="primary" id="cxSignAll" type="button" disabled>一键签到</button>
             <button id="cxLogout" type="button" hidden>退出登录</button>
           </div>
+
+
         </section>
       </div>
     </div>
@@ -289,6 +291,24 @@
       <div class="sheet-actions">
         <button type="button" id="yktAppBack">返回重填</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- 学习通 · 滑块验证码（取图来自 captcha.chaoxing.com） -->
+<div class="backdrop" id="cxCapBackdrop" role="dialog" aria-modal="true" aria-labelledby="cxCapTitle">
+  <div class="sheet cap-sheet">
+    <h2 id="cxCapTitle">滑动验证</h2>
+    <p class="lead">把下面的拼图拖到缺口处，然后点「验证」。</p>
+    <div class="cap-stage" id="cxCapStage">
+      <img id="cxCapBg" alt="验证码背景">
+      <img id="cxCapSlice" alt="拼图" draggable="false">
+    </div>
+    <p class="err-line" id="cxCapMsg" role="status"></p>
+    <div class="sheet-actions">
+      <button type="button" id="cxCapRetry">换一张</button>
+      <button type="button" id="cxCapCancel">取消</button>
+      <button type="button" class="primary" id="cxCapSubmit">验证</button>
     </div>
   </div>
 </div>
@@ -480,7 +500,7 @@
 <script src="ascii-sharks.bundle.js?v=2026.11.16.7"></script>
 <script src="app.js?v=2026.11.25.1"></script>
 <script src="ykt.js?v=2026.11.25.5"></script>
-<script src="cx.js?v=2026.11.25.17"></script>
+<script src="cx.js?v=2026.11.25.19"></script>
 <script src="im.js?v=2026.11.25.14"></script>
 <script src="ppt.js?v=2026.11.25.14"></script>
 <script>

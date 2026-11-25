@@ -895,17 +895,32 @@ class CxCaptcha:
         img = self._parse(r2.body)
         if not img:
             return {'ok': False, 'error': '验证码图片解析失败'}
+        # 真实结构：{token, imageVerificationVo: {type, shadeImage, cutoutImage}}
+        # shadeImage = 背景（带缺口阴影），cutoutImage = 滑块那块拼图，都是远程 URL。
+        vo = img.get('imageVerificationVo') if isinstance(img.get('imageVerificationVo'), dict) else {}
         return {
             'ok': True,
-            'bg': str(img.get('bg') or ''),
-            'slice': str(img.get('slice') or ''),
-            'token': token,
+            'bg': str(vo.get('shadeImage') or img.get('bg') or ''),
+            'slice': str(vo.get('cutoutImage') or img.get('slice') or ''),
+            'token': str(img.get('token') or token),
+            'iv': self.iv,
+            'ts': self.timestamp,
+            'width': _int(vo.get('originalWidth')) or 0,
             'y': _int(img.get('y')),
             'error': '',
         }
 
-    def submit(self, x: float, token: str, referer: str) -> tuple[str, str]:
-        """提交滑动位置，成功返回 (validate, '')。"""
+    def submit(self, x: float, token: str, referer: str,
+               iv: str = '', ts: int = 0) -> tuple[str, str]:
+        """提交滑动位置，成功返回 (validate, '')。
+
+        iv/ts 可以从外部传回来：服务端是无状态的，取图和验证是两次请求，
+        中间可能落在不同线程/实例上。
+        """
+        if iv:
+            self.iv = iv
+        if ts:
+            self.timestamp = int(ts)
         if not self.iv or not self.timestamp:
             return '', '验证码未初始化'
         r = core.request('GET', CAPTCHA_HOST + '/captcha/check/verification/result?' +

@@ -1030,6 +1030,41 @@ class Handler(BaseHTTPRequestHandler):
         def one(name: str, default: str = '') -> str:
             return (q.get(name) or [default])[0]
 
+        if path == '/api/cx/captcha/start':
+            # 取一张滑块验证码：返回背景/拼图地址 + token/iv/ts，前端拖完再回来换 validate
+            ref = one('referer') or 'https://mobilelearn.chaoxing.com/'
+            try:
+                data = cxapi.CxCaptcha().fetch(ref)
+            except Exception as e:                   # noqa: BLE001
+                self._json({'ok': False, 'error': friendly_error(e)})
+                return
+            if not data.get('ok'):
+                self._json(data)
+                return
+            def _proxy(u: str) -> str:
+                return '/api/cx/captcha/img?u=' + urllib.parse.quote(u, safe='') if u else ''
+            data['bg'] = _proxy(data.get('bg') or '')
+            data['slice'] = _proxy(data.get('slice') or '')
+            self._json(data)
+            return
+
+        if path == '/api/cx/captcha/img':
+            # 验证码图在 captcha-b.chaoxing.com，带 Referer 才给，走本地代理也避开前端跨域
+            u = one('u')
+            if not u.startswith(('http://', 'https://')):
+                self._send(400, b'bad url', 'text/plain; charset=utf-8')
+                return
+            try:
+                raw = yktcore.fetch_bytes(u, referer='https://captcha.chaoxing.com/',
+                                          timeout=20)
+            except Exception:                        # noqa: BLE001
+                raw = None
+            if not raw:
+                self._send(502, b'no image', 'text/plain; charset=utf-8')
+                return
+            self._send(200, raw, 'image/png')
+            return
+
         if path == '/api/cx/im/session':
             self._json(im_session())
             return
@@ -1224,6 +1259,23 @@ class Handler(BaseHTTPRequestHandler):
                 yktcore.log(f'[群聊] 收到 {added} 条新活动（共 {len(cxsign._CHAT_SIGNS)} 条）')
             self._json({'ok': True, 'added': added,
                         'total': len(cxsign._CHAT_SIGNS)})
+            return
+
+        if path == '/api/cx/captcha/verify':
+            x = body.get('x')
+            token = str(body.get('token') or '')
+            iv = str(body.get('iv') or '')
+            ts = int(body.get('ts') or 0)
+            ref = str(body.get('referer') or 'https://mobilelearn.chaoxing.com/')
+            if x is None or not token:
+                self._json({'ok': False, 'error': '缺少 x 或 token'})
+                return
+            try:
+                val, err = cxapi.CxCaptcha().submit(float(x), token, ref, iv=iv, ts=ts)
+            except Exception as e:                   # noqa: BLE001
+                self._json({'ok': False, 'error': friendly_error(e)})
+                return
+            self._json({'ok': bool(val), 'validate': val, 'error': err})
             return
 
         if path == '/api/cx/chat/scan':

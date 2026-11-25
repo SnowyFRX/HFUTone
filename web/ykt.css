@@ -1363,3 +1363,39 @@ body.is-side-drag .side > .side-shell { transition: none; }
   .side { overflow-y: auto; }
   .live-card { width: auto; }
 }
+
+/* ---------------------------------------------- 学习通滑块验证码
+   背景图 320x160（服务端原始尺寸），拼图 56x160。
+   x 的算法照 course_helper：drag(设计坐标) * 280/264 - 8，再按缩放换算回原图。 */
+.cap-sheet { width: min(380px, 100%); }
+
+.cap-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  margin: var(--s3) 0 var(--s2);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: #ddd;
+  touch-action: none;
+  user-select: none;
+}
+
+.cap-stage img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+#cxCapSlice {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 17.5%;
+  height: 100%;
+  cursor: grab;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, .5));
+}
+
+#cxCapSlice:active { cursor: grabbing; }
