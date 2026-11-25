@@ -36,6 +36,7 @@ import cxsign                                                       # noqa: E402
 import cxchat                                                       # noqa: E402
 import yktapplogin                                                  # noqa: E402
 import yktqr                                                        # noqa: E402
+import autosign                                                     # noqa: E402
 
 PPT_RELAY = hfutplay.RELAY                       # PPT 抽帧转发（一路）
 
@@ -107,13 +108,17 @@ DEFAULT_SETTINGS = {
     # signMode 默认 app：实测（2026-11-23）App 登录拿到的凭据配 App 头，
     # on-lesson 直接 200，动态码考勤不再要求交码；而且同一套凭据连 web 头也能通。
     # 所以 App 身份就是主形态，"先扫码再 App 头对照"除了多一次失败请求没意义。
-    'ykt': {'signMode': 'app'},
+    'ykt': {'signMode': 'app', 'autoSign': False},
     'cx': {'location': {'address': '', 'lat': 0.0, 'lng': 0.0},
             'extraCourses': [],
             # 自动刷新签到信息：程序开着时定时扫一遍（两端都支持）
             'autoScan': True,
-            # 自动提交签到：只对桌面版有效，默认关（安卓不做，见 README）
+            # 自动提交签到：由后端守护线程执行（桌面 + 安卓两端均支持，默认关）
             'autoSign': False},
+    'autoSign': {
+        'pollIntervalSec': autosign.DEFAULT_POLL_INTERVAL,
+        'webhookUrl': '',
+    },
 }
 
 YKT_SIGN_MODES = ('app', 'scan', 'both')
@@ -185,6 +190,23 @@ def read_settings() -> dict:
             mode = str(ykt.get('signMode') or '').strip().lower()
             if mode in YKT_SIGN_MODES:
                 blob['ykt']['signMode'] = mode
+            if isinstance(ykt.get('autoSign'), bool):
+                blob['ykt']['autoSign'] = ykt['autoSign']
+        auto_cfg = raw.get('autoSign')
+        if isinstance(auto_cfg, dict):
+            if auto_cfg.get('pollIntervalSec') is not None:
+                try:
+                    sec = int(auto_cfg['pollIntervalSec'])
+                    blob['autoSign']['pollIntervalSec'] = max(
+                        autosign.MIN_POLL_INTERVAL,
+                        min(autosign.MAX_POLL_INTERVAL, sec),
+                    )
+                except (TypeError, ValueError):
+                    pass
+            if isinstance(auto_cfg.get('webhookUrl'), str):
+                wh = auto_cfg['webhookUrl'].strip()
+                if not wh or wh.startswith(('http://', 'https://')):
+                    blob['autoSign']['webhookUrl'] = wh
         cx = raw.get('cx')
         if isinstance(cx, dict):
             loc = cx.get('location')
@@ -280,6 +302,23 @@ def write_settings(patch: dict) -> dict:
         mode = str(ykt.get('signMode') or '').strip().lower()
         if mode in YKT_SIGN_MODES:
             cfg['ykt']['signMode'] = mode
+        if isinstance(ykt.get('autoSign'), bool):
+            cfg['ykt']['autoSign'] = ykt['autoSign']
+    auto_cfg = patch.get('autoSign') or {}
+    if isinstance(auto_cfg, dict):
+        if auto_cfg.get('pollIntervalSec') is not None:
+            try:
+                sec = int(auto_cfg['pollIntervalSec'])
+                cfg['autoSign']['pollIntervalSec'] = max(
+                    autosign.MIN_POLL_INTERVAL,
+                    min(autosign.MAX_POLL_INTERVAL, sec),
+                )
+            except (TypeError, ValueError):
+                pass
+        if isinstance(auto_cfg.get('webhookUrl'), str):
+            wh = auto_cfg['webhookUrl'].strip()
+            if not wh or wh.startswith(('http://', 'https://')):
+                cfg['autoSign']['webhookUrl'] = wh
     cx = patch.get('cx') or {}
     if isinstance(cx, dict):
         loc = cx.get('location')
@@ -306,6 +345,8 @@ def write_settings(patch: dict) -> dict:
         SETTINGS_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), 'utf-8')
     except OSError:
         pass
+    if 'AUTOSIGN' in globals():
+        AUTOSIGN.notify_config_changed()
     return cfg
 
 
@@ -957,6 +998,13 @@ class CxState:
 
 CX = CxState()
 
+AUTOSIGN = autosign.AutoSignEngine(
+    get_settings=read_settings,
+    get_cx=lambda: CX,
+    get_ykt=lambda: YKT,
+    qr_grabber=qr_from_relay,
+)
+
 
 def _num(v):
     """把前端传来的坐标转成 float；空串/None 一律当「没给」。"""
@@ -1258,15 +1306,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/cx/im/events':
             # 前端环信 Web SDK 收到的群消息，把里头的签到活动交过来。
             # 群消息只能由客户端 SDK 拿（REST 没有历史消息接口），所以这条路
-            # 是「群聊签到」唯一的数据来源。
+            # 是「群聊签到」唯一的数据来源。同时触发后端 IM 秒签队列。
             items = body.get('items')
             if not isinstance(items, list):
                 self._json({'ok': False, 'error': 'items 要数组'})
                 return
+            realtime = bool(body.get('realtime', True))
             added = cxsign.set_chat_signs(items)
+            queued = AUTOSIGN.on_im_events(items, realtime=realtime)
             if added:
-                yktcore.log(f'[群聊] 收到 {added} 条新活动（共 {len(cxsign._CHAT_SIGNS)} 条）')
-            self._json({'ok': True, 'added': added,
+                yktcore.log(f'[群聊] 收到 {added} 条新活动（共 {len(cxsign._CHAT_SIGNS)} 条，入秒签队 {queued} 条）')
+            self._json({'ok': True, 'added': added, 'queued': queued,
                         'total': len(cxsign._CHAT_SIGNS)})
             return
 
@@ -1831,6 +1881,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/settings':
             self._json({'ok': True, 'settings': read_settings()})
             return
+        if path == '/api/autosign/state':
+            self._json(AUTOSIGN.status_payload())
+            return
         if path == '/api/live/state':
             with STATE.lock:
                 auto = dict(STATE.auto)
@@ -1899,6 +1952,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/settings':
             cfg = write_settings(body or {})
             self._json({'ok': True, 'settings': cfg})
+            return
+
+        if path == '/api/autosign/trigger':
+            platform = str(body.get('platform') or 'all')
+            res = AUTOSIGN.trigger_now(platform=platform)
+            self._json({**res, 'state': AUTOSIGN.status_payload()})
+            return
+
+        if path == '/api/autosign/test_webhook':
+            url = str(body.get('url') or '')
+            ok, msg = AUTOSIGN.test_webhook(url=url)
+            self._json({'ok': ok, 'detail': msg})
+            return
+
+        if path == '/api/autosign/clear':
+            AUTOSIGN.clear_events()
+            self._json({'ok': True, 'state': AUTOSIGN.status_payload()})
             return
 
         if path == '/api/live/ppt/stop':
@@ -2140,6 +2210,7 @@ def main():
     port = int(os.environ.get('HFUT_PORT') or 0) or pick_port(DEFAULT_PORT)
     srv = LocalServer(('127.0.0.1', port), Handler)
     YKT.start_monitor()
+    AUTOSIGN.start()
     threading.Thread(target=autopilot_loop, daemon=True).start()
     srv.daemon_threads = True
     url = f'http://127.0.0.1:{port}/'

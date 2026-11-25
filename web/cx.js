@@ -226,6 +226,7 @@
         if ($('cxPassword')) { $('cxPassword').value = ''; }
         closeLogin();
         toast('学习通登录成功', 'ok');
+        if (window.HFUToneIM) { try { window.HFUToneIM.connect(true); } catch (e) { /* 忽略 */ } }
         refresh().then(function () { return doScan(); });
       } else {
         if (msg) { msg.textContent = (d && d.error) || '登录失败'; }
@@ -251,9 +252,8 @@
   function applySettings(cfg) {
     var cx = (cfg || {}).cx || {};
     S.cfg = { autoScan: cx.autoScan !== false, autoSign: !!cx.autoSign };
-    // 安卓不做自动签到，即使配置里是 true 也按 false 走
-    if (document.body.classList.contains('is-android')) { S.cfg.autoSign = false; }
     startAutoScan();
+    if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
   }
 
   window.cxApplySettings = applySettings;
@@ -279,28 +279,25 @@
     });
   }
 
-  /* 自动签到：只在桌面版、且设置里勾了「自动签到」时执行。
-     安卓不做（README 里有说明），所以这里先判一次平台。
-     串行提交，避免几个签到同时打出去。 */
+  /* 自动签到已统一交由后端 AutoSignEngine（IM 事件秒签 + 低频轮询，桌面与安卓通用）。
+     这里只在前端刷新发现尚有可自动项时唤醒后端处理一次，避免前后端并发重复提交。 */
   function autoSignIfEnabled() {
-    if (document.body.classList.contains('is-android')) { return; }
     if (!S.cfg || !S.cfg.autoSign) { return; }
     if (AUTO.running) { return; }
     var targets = liveSigns().filter(function (x) { return x.canAuto && !x.signed; });
     if (!targets.length) { return; }
     AUTO.running = true;
-    toast('自动签到：' + targets.length + ' 条', 'ok');
-    var i = 0;
-    function next() {
-      if (i >= targets.length) {
-        AUTO.running = false;
-        AUTO.lastSign = Date.now();
-        return;
+    api('/api/autosign/trigger', { platform: 'cx' }).then(function (d) {
+      AUTO.running = false;
+      AUTO.lastSign = Date.now();
+      if (window.refreshAutoSignState) { window.refreshAutoSignState(); }
+      if (d && d.cx && d.cx.signed) {
+        toast('后端已自动签到 ' + d.cx.signed + ' 条', 'ok');
+        refresh();
       }
-      var it = targets[i++];
-      signOne(it, {}).then(function () { next(); }, function () { next(); });
-    }
-    next();
+    }, function () {
+      AUTO.running = false;
+    });
   }
 
   /* 自动刷新。

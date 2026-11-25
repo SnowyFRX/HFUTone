@@ -14,7 +14,7 @@
  */
 (function () {
   var SDK_URL = '/im/Easemob.js';
-  var CORE = { conn: null, ready: false, tried: false, acts: [], sent: 0 };
+  var CORE = { conn: null, ready: false, tried: false, acts: [], sent: 0, retryTimer: 0, retryDelay: 5000 };
 
   function log(s) {
     try { console.log('[IM] ' + s); } catch (e) { /* 忽略 */ }
@@ -37,19 +37,29 @@
     document.head.appendChild(el);
   }
 
-  function report(items) {
+  function report(items, realtime) {
     if (!items || !items.length) { return; }
+    var isRt = (realtime !== false);
     fetch('/api/cx/im/events', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: items })
+      body: JSON.stringify({ items: items, realtime: isRt })
     }).then(function (r) { return r.json(); }).then(function (d) {
       if (d && d.ok) {
         CORE.sent += (d.added || 0);
-        if (d.added) {
+        if (d.queued) {
+          log((isRt ? '实时收到' : '漫游补录') + '，已触发后端秒签（' + d.queued + ' 条）');
+        } else if (d.added) {
           log('上报 ' + d.added + ' 条（累计 ' + d.total + '）');
-          // 有新活动就让列表刷一下
+        }
+        if (d.added || d.queued) {
+          // 有新活动或触发秒签就让列表与状态面板刷新
           if (window.cxRefresh) { try { window.cxRefresh(); } catch (e) { /* 忽略 */ } }
+          if (window.refreshAutoSignState) {
+            setTimeout(function () {
+              try { window.refreshAutoSignState(); } catch (e) { /* 忽略 */ }
+            }, 1200);
+          }
         }
       }
     }).catch(function () { /* 后端没起来就算了 */ });
@@ -100,7 +110,7 @@
             });
             if (acts.length) {
               log(g.groupId + ' 拉到 ' + acts.length + ' 条活动');
-              report(acts);
+              report(acts, false);
             }
             next();
           },
@@ -114,18 +124,35 @@
     next();
   }
 
-  function connect() {
-    if (CORE.tried) { return; }
+  function scheduleReconnect(why) {
+    if (CORE.retryTimer) { return; }
+    var wait = CORE.retryDelay;
+    CORE.retryDelay = Math.min(30000, CORE.retryDelay * 2);
+    log((why || '连接断开') + '，' + Math.round(wait / 1000) + ' 秒后自动重连');
+    CORE.retryTimer = setTimeout(function () {
+      CORE.retryTimer = 0;
+      CORE.tried = false;
+      connect(true);
+    }, wait);
+  }
+
+  function connect(force) {
+    if (CORE.ready) { return; }
+    if (CORE.tried && !force) { return; }
     CORE.tried = true;
     ensureSdk(function (ok) {
-      if (!ok) { log('SDK 加载失败（/im/Easemob.js 没取到）'); return; }
+      if (!ok) { CORE.tried = false; log('SDK 加载失败（/im/Easemob.js 没取到）'); return; }
       var W = window.websdk;
       var NS = W.default || W;
-      if (!NS || typeof NS.connection !== 'function') { log('SDK 形态不认识'); return; }
+      if (!NS || typeof NS.connection !== 'function') { CORE.tried = false; log('SDK 形态不认识'); return; }
 
       log('SDK 已加载，正在取 IM 会话…');
       fetch('/api/cx/im/session').then(function (r) { return r.json(); }).then(function (d) {
-        if (!d || !d.ok) { log('没拿到 IM 会话：' + ((d && d.error) || '未知')); return; }
+        if (!d || !d.ok) {
+          CORE.tried = false;
+          log('没拿到 IM 会话：' + ((d && d.error) || '未知'));
+          return;
+        }
         log('拿到会话，正在连接（' + (d.groups || []).length + ' 个群）');
 
         W.config = {
@@ -165,11 +192,20 @@
         CORE.conn.listen({
           onOpened: function () {
             CORE.ready = true;
-            log('已连接，开始拉群消息');
+            CORE.retryDelay = 5000;
+            if (CORE.retryTimer) { clearTimeout(CORE.retryTimer); CORE.retryTimer = 0; }
+            log('已连接（实时监听中），开始拉群消息');
             pullRoaming(d.groups || []);
           },
-          onClosed: function () { CORE.ready = false; },
-          onOffline: function () { CORE.ready = false; },
+          onClosed: function () {
+            var wasReady = CORE.ready;
+            CORE.ready = false;
+            if (wasReady) { scheduleReconnect('连接已关闭'); }
+          },
+          onOffline: function () {
+            CORE.ready = false;
+            scheduleReconnect('网络离线');
+          },
           onError: function (e) {
             CORE.error = JSON.stringify(e || {}).slice(0, 120);
             log('连接出错：' + CORE.error);
@@ -179,7 +215,7 @@
             if (!a) { return; }
             CORE.acts.push(a);
             log('收到活动：' + a.courseName + ' / ' + a.atypeName);
-            report([a]);
+            report([a], true);
           }
         });
         CORE.conn.open({
@@ -189,21 +225,29 @@
           appKey: W.config.appkey
         });
         log('正在连接 uid=' + String(d.uid).slice(0, 3) + '***');
-      }).catch(function (e) { log('取会话请求失败：' + e); });
+      }).catch(function (e) { CORE.tried = false; log('取会话请求失败：' + e); });
     });
   }
 
-  /* 打开学习通面板时再连，别在启动时就占一条长连接 */
+  /* 方案三：启动后如果学习通已登录，自动建立环信长连接用于实时秒签，
+     不再等用户手动点开学习通 tab。 */
+  function autoConnectIfLoggedIn() {
+    fetch('/api/cx/state').then(function (r) { return r.json(); }).then(function (d) {
+      if (d && d.loggedIn) { connect(false); }
+    }).catch(function () { /* 忽略 */ });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
     var tab = document.querySelector('[data-tab="cx"], #tabCx, #btnCx');
-    if (tab) { tab.addEventListener('click', function () { connect(); }); }
+    if (tab) { tab.addEventListener('click', function () { connect(false); }); }
     // 兜底：登录成功后第一次刷新签到也连上
     var btn = document.getElementById('cxScanBtn');
-    if (btn) { btn.addEventListener('click', function () { connect(); }); }
+    if (btn) { btn.addEventListener('click', function () { connect(false); }); }
     ['tabCx', 'btnCx'].forEach(function (id) {
       var el = document.getElementById(id);
-      if (el) { el.addEventListener('click', function () { connect(); }); }
+      if (el) { el.addEventListener('click', function () { connect(false); }); }
     });
+    setTimeout(autoConnectIfLoggedIn, 1500);
   });
 
   window.HFUToneIM = { connect: connect, state: CORE };

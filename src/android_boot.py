@@ -54,6 +54,8 @@ def boot(config_dir: str, web_dir: str = '', port: int = 0) -> int:
         raise last or OSError('没有可用端口')
 
     threading.Thread(target=srv.serve_forever, name='hfut-http', daemon=True).start()
+    server.YKT.start_monitor()
+    server.AUTOSIGN.start()
     _state['srv'] = srv
     _state['port'] = int(srv.server_address[1])
     return _state['port']
