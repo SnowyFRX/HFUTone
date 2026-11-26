@@ -1,6 +1,6 @@
 {
-  "version": "1.4.4",
-  "code": 24,
-  "notes": "滑块自动识别、强制人脸三环修复、后端自动签到引擎",
-  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.4"
+  "version": "1.4.5",
+  "code": 25,
+  "notes": "更新检测、设置分档、安卓保活引导、说明弹层",
+  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.5"
 }

@@ -57,6 +57,12 @@ git config core.hooksPath .githooks     # 指向仓库里的 .githooks/pre-commi
 误报的处理方式：把那个词加进 `tools/release_check.py` 的 `PLACEHOLDER_HINTS`
 （`replay`、`{token}`、`<32HEX>` 这些已经在里面了），而不是给提交加 `--no-verify`。
 
+## 发布节奏
+
+- `1.x`（x 升级）：**新建**一个 Release。
+- `1.x.y`（y 升级）：**替换**上一个 Release——沿用同一个页面，改它的 tag、标题和
+  说明，附件换成新版本，不要另开一页。
+
 ## 提交习惯
 
 - **提交、推送、移动 tag 之前必须先问过用户**，得到明确同意再执行。不要自己

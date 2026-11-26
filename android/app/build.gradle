@@ -24,8 +24,8 @@ android {
         // 每次发版都要动这两个数：同版本号的两个包装在手机上完全看不出来，
         // 装没装新包就成了猜谜（2026-11-24 实际踩过：APK 里代码是新的，
         // 手机上那份是旧的，版本号一样，分不清）。
-        versionCode 24
-        versionName '1.4.4'
+        versionCode 25
+        versionName '1.4.5'
         ndk {
             // 雷电是 x86_64；真机是 arm64
             abiFilters 'x86_64', 'arm64-v8a'

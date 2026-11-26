@@ -1268,8 +1268,11 @@ body.is-side-drag .side > .side-shell { transition: none; }
   color: var(--muted);
   font: inherit;
   font-size: 13px;
-  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease,
+              transform .12s ease;
 }
+
+.set-tab:active { transform: scale(.97); }
 
 .set-tab.is-on {
   background: var(--canvas);
@@ -1281,6 +1284,17 @@ body.is-side-drag .side > .side-shell { transition: none; }
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--s3);
+  /* 切换时淡入并轻微上浮，别让整块面板硬切 */
+  animation: pane-in .18s ease-out;
+}
+
+@keyframes pane-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .set-pane { animation: none; }
 }
 
 .set-pane[hidden] { display: none; }
