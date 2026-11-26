@@ -37,6 +37,8 @@ YKT_POLL_BASE = 30.0
 DEFAULT_POLL_INTERVAL = 180
 MIN_POLL_INTERVAL = 60
 MAX_POLL_INTERVAL = 600
+# 当后端 IM 长连接暂时离线时，自动把学习通兜底轮询收紧到 45 秒以内，避免退化成 180 秒漏签
+IM_OFFLINE_FALLBACK_SEC = 45.0
 
 
 def _now_str(ts: float | None = None) -> str:
@@ -122,6 +124,7 @@ class AutoSignEngine:
         webhook_sender: Callable[..., tuple[bool, str]] = send_webhook,
         clock: Callable[[], float] = time.time,
         rng: Callable[[float, float], float] = random.uniform,
+        im_status_fn: Callable[[], dict] | None = None,
     ):
         self._get_settings = get_settings
         self._get_cx = get_cx
@@ -130,6 +133,7 @@ class AutoSignEngine:
         self._webhook_sender = webhook_sender
         self._clock = clock
         self._rng = rng
+        self._im_status_fn = im_status_fn
 
         self.lock = threading.RLock()
         self._stop = threading.Event()
@@ -714,6 +718,21 @@ class AutoSignEngine:
         factor = self._rng(0.85, 1.15)
         return max(10.0, base * factor)
 
+    def _im_connected(self) -> bool:
+        if self._im_status_fn is None:
+            return True
+        try:
+            st = self._im_status_fn() or {}
+            return bool(st.get('connected'))
+        except Exception:                                # noqa: BLE001
+            return False
+
+    def _effective_cx_interval(self, cfg: dict | None = None) -> float:
+        base = float(self._poll_interval(cfg))
+        if not self._im_connected():
+            return min(base, IM_OFFLINE_FALLBACK_SEC)
+        return base
+
     def _poll_loop(self) -> None:
         # 启动后稍等 5 秒，等登录态/IM 连接预热
         self._wake.wait(timeout=5.0)
@@ -723,7 +742,7 @@ class AutoSignEngine:
             cfg = self._cfg()
             cx_on = self._cx_enabled(cfg)
             ykt_on = self._ykt_enabled(cfg)
-            cx_interval = float(self._poll_interval(cfg))
+            cx_interval = self._effective_cx_interval(cfg)
 
             if ykt_on and now >= self._next_ykt_poll:
                 try:
@@ -753,6 +772,7 @@ class AutoSignEngine:
 
     def status_payload(self) -> dict:
         cfg = self._cfg()
+        im_ok = self._im_connected()
         with self.lock:
             events = list(reversed(self._events))
             stats = dict(self._stats)
@@ -763,6 +783,8 @@ class AutoSignEngine:
             'cxAutoSign': self._cx_enabled(cfg),
             'yktAutoSign': self._ykt_enabled(cfg),
             'pollIntervalSec': self._poll_interval(cfg),
+            'effectiveCxPollSec': int(self._effective_cx_interval(cfg)),
+            'imConnected': im_ok,
             'webhookConfigured': bool(self._webhook_url(cfg)),
             'imQueued': self._im_queue.qsize(),
             'lastCxPoll': int(self._last_cx_poll),

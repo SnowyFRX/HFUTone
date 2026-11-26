@@ -42,7 +42,7 @@ a = Analysis(                  # noqa: F821
     ] + [(str(ROOT / 'assets' / 'hfutlive-hd.png'), 'assets')],
     hiddenimports=['server', 'hfutlive', 'yktcore', 'yktapi', 'yktws',
                    'yktapplogin', 'yktqr', 'hfutplay', 'wsserve',
-                   'cxapi', 'cxsign', 'cxcrypto', 'cxdes', 'cxchat', 'autosign',
+                   'cxapi', 'cxsign', 'cxcrypto', 'cxdes', 'cxchat', 'cxim', 'autosign',
                    'cv2', 'numpy'],
     hookspath=[],
     hooksconfig={},

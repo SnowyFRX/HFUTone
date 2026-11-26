@@ -55,6 +55,7 @@ def boot(config_dir: str, web_dir: str = '', port: int = 0) -> int:
 
     threading.Thread(target=srv.serve_forever, name='hfut-http', daemon=True).start()
     server.YKT.start_monitor()
+    server.CX_IM.start()
     server.AUTOSIGN.start()
     _state['srv'] = srv
     _state['port'] = int(srv.server_address[1])

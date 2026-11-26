@@ -59,6 +59,7 @@ def start_server() -> int:
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     threading.Thread(target=sv.STATE.load, daemon=True).start()
     sv.YKT.start_monitor()
+    sv.CX_IM.start()
     sv.AUTOSIGN.start()
     return port
 

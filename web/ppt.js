@@ -566,10 +566,11 @@
       title.textContent = '自动签到守护：' + suffix;
     }
     if (meta) {
+      var effSec = d.effectiveCxPollSec || d.pollIntervalSec || 180;
       var parts = [
         '学习通：' + (d.cxAutoSign ? '开' : '关'),
         '雨课堂：' + (d.yktAutoSign ? '开' : '关'),
-        '兜底 ' + (d.pollIntervalSec || 180) + 's',
+        d.imConnected ? ('后端IM在线 · 兜底 ' + effSec + 's') : ('IM重连中 · 降级 ' + effSec + 's'),
         '已签 ' + (st.signed || 0)
       ];
       if (st.imTriggered) { parts.push('IM 秒签 ' + st.imTriggered); }

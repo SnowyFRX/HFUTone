@@ -34,6 +34,7 @@ import yktcore                                                      # noqa: E402
 import cxapi                                                        # noqa: E402
 import cxsign                                                       # noqa: E402
 import cxchat                                                       # noqa: E402
+import cxim                                                         # noqa: E402
 import yktapplogin                                                  # noqa: E402
 import yktqr                                                        # noqa: E402
 import autosign                                                     # noqa: E402
@@ -1000,11 +1001,27 @@ class CxState:
 
 CX = CxState()
 
+
+def _on_backend_im_activities(items: list[dict], realtime: bool) -> None:
+    """后端环信长连接收到群聊签到后，直接并入列表并触发秒签（不依赖 WebView）。"""
+    added = cxsign.set_chat_signs(items)
+    queued = AUTOSIGN.on_im_events(items, realtime=realtime)
+    if added or queued:
+        tag = '实时推送' if realtime else '漫游补录'
+        yktcore.log(f'[后端IM] {tag}：新增 {added} 条，入秒签队 {queued} 条')
+
+
+CX_IM = cxim.BackendIMClient(
+    get_cx_state=lambda: CX,
+    on_activities=_on_backend_im_activities,
+)
+
 AUTOSIGN = autosign.AutoSignEngine(
     get_settings=read_settings,
     get_cx=lambda: CX,
     get_ykt=lambda: YKT,
     qr_grabber=qr_from_relay,
+    im_status_fn=CX_IM.status_payload,
 )
 
 
@@ -1128,6 +1145,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(im_session())
             return
 
+        if path == '/api/cx/im/status':
+            self._json(CX_IM.status_payload())
+            return
+
         if path == '/api/cx/state':
             self._json(CX.payload())
             return
@@ -1171,6 +1192,8 @@ class Handler(BaseHTTPRequestHandler):
                 CX.qr_msg = msg
                 if state in ('ok', 'fail'):
                     CX.qr_uuid = ''
+            if state == 'ok':
+                CX_IM.notify_login_changed()
             self._json({'ok': state == 'ok', 'state': state, 'message': msg,
                         'loggedIn': CX.logged_in,
                         'profile': CX.signer.profile() if CX.logged_in else {}})
@@ -1199,6 +1222,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             with CX.lock:
                 CX.error = '' if ok else msg
+            if ok:
+                CX_IM.notify_login_changed()
             self._json({'ok': ok, 'error': '' if ok else msg,
                         'profile': CX.signer.profile() if ok else {}})
             return
@@ -1211,7 +1236,13 @@ class Handler(BaseHTTPRequestHandler):
             with CX.lock:
                 CX.qr_uuid = CX.qr_enc = ''
                 CX.qr_state = 'idle'
+            CX_IM.notify_login_changed()
             self._json({'ok': True})
+            return
+
+        if path == '/api/cx/im/reconnect':
+            CX_IM.notify_login_changed()
+            self._json(CX_IM.status_payload())
             return
 
         if path == '/api/cx/scan':
@@ -2226,6 +2257,7 @@ def main():
     port = int(os.environ.get('HFUT_PORT') or 0) or pick_port(DEFAULT_PORT)
     srv = LocalServer(('127.0.0.1', port), Handler)
     YKT.start_monitor()
+    CX_IM.start()
     AUTOSIGN.start()
     threading.Thread(target=autopilot_loop, daemon=True).start()
     srv.daemon_threads = True
