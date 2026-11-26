@@ -59,6 +59,8 @@ git config core.hooksPath .githooks     # 指向仓库里的 .githooks/pre-commi
 
 ## 提交习惯
 
+- **提交、推送、移动 tag 之前必须先问过用户**，得到明确同意再执行。不要自己
+  commit / push / `git tag -f`。
 - 一次改动一个提交，提交信息**要短**：标题一行说清改了什么，正文最多一两句讲原因。
   排查过程、验证数据、长篇推理不要写进提交信息。
 - 入库前确认没有 `.config/`（含 cookie、登录日志）、`dist/`、`vendor/ffmpeg/`。
