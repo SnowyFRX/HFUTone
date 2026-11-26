@@ -1329,6 +1329,19 @@ body.is-side-drag .side > .side-shell { transition: none; }
   text-underline-offset: 2px;
 }
 
+/* 说明弹层顶部的新版本提示（启动时静默检查命中才出现） */
+.about-update {
+  margin: 0 0 var(--s3);
+  font-size: 13px;
+  color: var(--accent-deep);
+}
+
+.about-update a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* 窗口窄的时候退回单列 */
 @media (max-width: 780px) {
   .set-pane { grid-template-columns: 1fr; }

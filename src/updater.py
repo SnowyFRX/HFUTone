@@ -1,11 +1,12 @@
 """updater.py —— 检查有没有新版本。
 
-三道公开源，全是公共设施，不依赖任何自建服务：
+每个用户在自己的设备上直接查，不经任何中转；也**不碰 api.github.com**
+（匿名 60 次/小时/IP，校园网 NAT 后面几十个人共用出口，撑不住）。
 
-  jsdelivr  仓库里的 web/version.json，公共 CDN，国内可达、没有限额
-  raw       GitHub raw，同一份文件的备用入口
-  api       releases/latest，结构化最准，但匿名只有 60 次/小时/IP，
-            校园网 NAT 后面几十个人共用出口，几小时就能打光——所以它只做兜底
+两路都是「读公开文件」，不限流：
+
+  jsdelivr  仓库里的 web/version.json，公共 CDN，国内可达
+  atom      GitHub Releases 的 atom feed，走 github.com 的 CDN，拿 tag
 
 结果缓存 6 小时，写 .config/update.json。检查失败一律静默返回，
 不抛异常、不阻断任何功能。
@@ -13,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -20,11 +22,11 @@ import yktcore as core
 
 SOURCES = (
     ('jsdelivr', 'https://cdn.jsdelivr.net/gh/SnowyFRX/HFUTone@main/web/version.json'),
-    ('raw', 'https://raw.githubusercontent.com/SnowyFRX/HFUTone/main/web/version.json'),
-    ('api', 'https://api.github.com/repos/SnowyFRX/HFUTone/releases/latest'),
+    ('atom', 'https://github.com/SnowyFRX/HFUTone/releases.atom'),
 )
 TIMEOUT = 8
-TTL = 6 * 3600
+# 30 分钟：jsDelivr 不限额，请求又是用户自己的设备发的，没必要压到 6 小时
+TTL = 30 * 60
 REPO = 'https://github.com/SnowyFRX/HFUTone'
 
 
@@ -57,10 +59,22 @@ def local_version(web_dir: Path) -> dict:
 
 
 def _fetch(name: str, url: str) -> dict | None:
+    accept = 'application/atom+xml' if name == 'atom' else 'application/json'
     r = core.request('GET', url, timeout=TIMEOUT, tag='update',
-                     extra_headers={'Accept': 'application/json'})
+                     extra_headers={'Accept': accept})
     if r.status != 200 or not r.body:
         return None
+
+    if name == 'atom':
+        # atom 里第一个 entry 就是最新 release，直接抠 tag，不解析 XML
+        m = re.search(r'/releases/tag/(v?\d+(?:\.\d+)*)', r.body)
+        if not m:
+            return None
+        tag = m.group(1)
+        return {'version': tag.lstrip('vV'),
+                'release': f'{REPO}/releases/tag/{tag}',
+                'notes': ''}
+
     try:
         d = json.loads(r.body)
     except ValueError:
@@ -68,13 +82,6 @@ def _fetch(name: str, url: str) -> dict | None:
     if not isinstance(d, dict):
         return None
 
-    if name == 'api':
-        tag = str(d.get('tag_name') or '')
-        if not tag:
-            return None
-        return {'version': tag.lstrip('vV'),
-                'release': f'{REPO}/releases/tag/{tag}',
-                'notes': str(d.get('body') or '')[:300]}
     ver = str(d.get('version') or '')
     if not ver:
         return None
@@ -100,6 +107,8 @@ def check(web_dir: Path, force: bool = False) -> dict:
             pass
 
     errors = []
+    seen = []
+    cur_t = ver_tuple(cur['version'])
     for name, url in SOURCES:
         try:
             got = _fetch(name, url)
@@ -109,27 +118,36 @@ def check(web_dir: Path, force: bool = False) -> dict:
         if not got:
             errors.append(f'{name}:无数据')
             continue
+        seen.append((name, got))
+        # 已经拿到比本地新的版本，后面几路不用再问（省 API 那 60 次额度）
+        if ver_tuple(got['version']) > cur_t:
+            break
 
-        out = {
-            'ok': True,
-            'current': cur['version'],
-            'latest': got['version'],
-            'hasNew': ver_tuple(got['version']) > ver_tuple(cur['version']),
-            'release': got.get('release') or f'{REPO}/releases',
-            'notes': got.get('notes') or '',
-            'source': name,
-            'cached': False,
-            'checkedAt': int(now),
-        }
-        try:
-            cache.write_text(json.dumps({'ts': now, 'result': out},
-                                        ensure_ascii=False), 'utf-8')
-        except OSError:
-            pass
-        return out
+    if not seen:
+        return {'ok': False, 'current': cur['version'], 'error': '检查失败',
+                'detail': '; '.join(errors)[:200]}
 
-    return {'ok': False, 'current': cur['version'], 'error': '检查失败',
-            'detail': '; '.join(errors)[:200]}
+    # 取最高版本而不是「第一路成功的」：jsDelivr 的 @main 有 12 小时缓存，
+    # 发版后一段时间它还返回旧版本，直接信它就会误报「已是最新」。
+    name, got = max(seen, key=lambda x: ver_tuple(x[1]['version']))
+
+    out = {
+        'ok': True,
+        'current': cur['version'],
+        'latest': got['version'],
+        'hasNew': ver_tuple(got['version']) > cur_t,
+        'release': got.get('release') or f'{REPO}/releases',
+        'notes': got.get('notes') or '',
+        'source': name,
+        'cached': False,
+        'checkedAt': int(now),
+    }
+    try:
+        cache.write_text(json.dumps({'ts': now, 'result': out},
+                                    ensure_ascii=False), 'utf-8')
+    except OSError:
+        pass
+    return out
 
 
 def reset_cache() -> None:

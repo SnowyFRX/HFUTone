@@ -45,18 +45,19 @@ calls = []
 def fake(method, url, **kw):
     calls.append(url)
     if 'jsdelivr' in url:
-        return Resp(0, '')
-    if 'raw.githubusercontent' in url:
-        return Resp(200, json.dumps({'version': '1.5.0', 'release': 'https://x'}))
-    return Resp(200, json.dumps({'tag_name': 'v1.5.0'}))
+        return Resp(0, '')                      # 主路挂掉
+    if 'releases.atom' in url:                  # 备用路：atom feed
+        return Resp(200, '<feed><entry><link href="https://github.com/SnowyFRX/'
+                         'HFUTone/releases/tag/v1.5.0"/></entry></feed>')
+    return Resp(0, '')
 
 
 updater.core.request = fake
 out = updater.check(Path('web'), force=True)
 check(out.get('ok') is True, '整体 ok')
-check(out.get('source') == 'raw', '降级到 raw（实际 %s）' % out.get('source'))
+check(out.get('source') == 'atom', '降级到 atom（实际 %s）' % out.get('source'))
 check(out.get('hasNew') is True, '1.5.0 比本地新')
-check('jsdelivr' in calls[0] and 'raw' in calls[1], '按顺序尝试')
+check('jsdelivr' in calls[0] and 'atom' in calls[1], '按顺序尝试')
 
 print('--- 3. 缓存：6 小时内不再请求 ---')
 calls.clear()

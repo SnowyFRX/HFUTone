@@ -98,6 +98,11 @@
   function openSettings() {
     loadSettings();
     backdrop.classList.add('open');
+    // 有未装的新版就落到「其他」档——「关于」在那儿，别让人自己翻
+    if (window.__updatePending) {
+      var tab = document.querySelector('.set-tab[data-pane="misc"]');
+      if (tab && !tab.classList.contains('is-on')) { tab.click(); }
+    }
     setTimeout(function () { var f = $('setAutoPlay'); if (f) { f.focus(); } }, 30);
   }
 
