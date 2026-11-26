@@ -66,6 +66,15 @@
 
 html, body { height: 100%; }
 
+/* 触屏点击不要系统那层蓝方块：WebView 的 -webkit-tap-highlight-color 默认是
+   半透明蓝，长按选中文本再叠一层 ::selection，看着就像界面坏了。 */
+html { -webkit-tap-highlight-color: transparent; }
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
 body {
   margin: 0;
   background: var(--canvas);
@@ -186,6 +195,9 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  /* 没有它，hover/active 都是瞬变，点起来像没反应 */
+  transition: background-color .16s ease, border-color .16s ease,
+              color .16s ease, box-shadow .16s ease, transform .12s ease;
   transition:
     background var(--fast) var(--ease),
     border-color var(--fast) var(--ease),
@@ -206,8 +218,21 @@ button:hover:not(:disabled) {
 }
 
 button:active:not(:disabled) {
-  transform: translateY(0);
+  transform: translateY(0) scale(.98);
   background: var(--tint-6);
+}
+
+/* 触屏上 :hover 会粘住上一次点过的按钮，看着像"选中"了；按压反馈改给 :active */
+@media (hover: none) {
+  button:hover:not(:disabled) {
+    background: var(--canvas);
+    border-color: var(--hairline);
+    transform: none;
+  }
+  button:active:not(:disabled) {
+    transform: scale(.97);
+    background: var(--tint-6);
+  }
 }
 
 button:disabled {
@@ -1038,6 +1063,9 @@ button.play {
 
 .sheet {
   width: min(420px, 100%);
+  /* 说明/设置这类长内容在小屏上会超出视口，不给高度上限就永远看不到底部 */
+  max-height: min(86vh, 860px);
+  overflow-y: auto;
   background: var(--canvas);
   border: 1px solid var(--hairline);
   border-radius: var(--r-xl);

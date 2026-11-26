@@ -1,11 +1,16 @@
 package com.hfutone.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -24,6 +29,53 @@ import android.webkit.WebViewClient;
 public class MainActivity extends Activity {
     private static final String TAG = "HFUTone";
     private WebView web;
+
+    /**
+     * 电池白名单。
+     *
+     * 前台服务只能保证「系统愿意留你」时不被杀，国产 ROM 的省电策略照样能清掉整个
+     * 进程，签到守护就此静默失效——用户还以为它在跑。这里在首次冷启动弹一次系统
+     * 对话框；被拒后不再纠缠（记在 SharedPreferences），用户可随时去系统设置里改。
+     */
+    private void ensureBatteryWhitelist() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) { return; }
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) { return; }
+        SharedPreferences sp = getSharedPreferences("hfutone", MODE_PRIVATE);
+        if (sp.getBoolean("battery_asked", false)) { return; }
+        sp.edit().putBoolean("battery_asked", true).apply();
+        // 别把用户直接扔进系统设置：先用自己的弹窗说清楚要干什么，他点了才跳
+        web.postDelayed(this::showBatteryDialog, 900);
+    }
+
+    private void showBatteryDialog() {
+        if (isFinishing()) { return; }
+        new AlertDialog.Builder(this)
+                .setTitle("让签到守护活过息屏")
+                .setMessage("系统在息屏后会清理后台进程，签到守护会静默停止，你不会收到任何提示。\n\n"
+                        + "把 HFUTone 排除出电池优化能明显降低被清理的概率。点「去设置」后系统会问一次，选「允许」。")
+                .setPositiveButton("去设置", (d, w) -> openBatterySettings())
+                .setNegativeButton("以后再说", null)
+                .show();
+    }
+
+    /** 跳系统设置让用户把本应用从电池优化里排除。首次自动弹，设置页也能手动点。 */
+    private void openBatterySettings() {
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            i.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(i);
+            Log.i(TAG, "已请求忽略电池优化");
+        } catch (Exception e) {
+            // 部分 ROM 阉了这个 Action，退回到列表页让用户自己找
+            Log.w(TAG, "电池优化对话框打不开：" + e);
+            try {
+                startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+            } catch (Exception ignored) {
+                // 打不开就算了，不能因此挡住界面
+            }
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,6 +97,11 @@ public class MainActivity extends Activity {
              */
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                // 设置页的「关闭电池优化」走这个内部 scheme，不经过系统浏览器
+                if (url != null && url.startsWith("hfutone://battery")) {
+                    openBatterySettings();
+                    return true;
+                }
                 if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
                     try {
                         Intent it = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url));
@@ -59,6 +116,9 @@ public class MainActivity extends Activity {
             }
         });
         setContentView(web);
+
+        // 电池白名单提示放在首屏之后：web 已就绪，postDelayed 才有意义
+        ensureBatteryWhitelist();
 
         // debug 包才开 WebView 调试：桌面 chrome://inspect 能直接看到页面控制台，
         // 前端布局/接口问题不用每次 adb logcat 猜。release 包保持关闭。

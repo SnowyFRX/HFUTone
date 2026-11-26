@@ -372,10 +372,51 @@ body.is-android .side:not(.is-open) {
   pointer-events: auto !important;
 }
 
-/* 顶栏按钮在 Android 上只剩两个，摊成一排更好按 */
+/* 顶栏按钮在 Android 上只剩「设置」一个，摊满整行更好按 */
 body.is-android .head-actions button {
-  flex: 1 1 30%;
+  flex: 1;
 }
+
+/* 安卓没有直播画面、侧栏又常驻，这个按钮点开是空的，直接撤掉 */
+body.is-android #btnYkt {
+  display: none !important;
+}
+
+/* 「说明」和「关闭电池优化」只对安卓有意义 */
+#btnAbout { display: none; }
+body.is-android #btnAbout { display: inline-flex; }
+
+/* 安卓没有直播链路，设置里那一档整块不可见，导航按钮也一起撤掉 */
+body.is-android .set-tab[data-pane="live"] { display: none; }
+
+.set-android-only { display: none; }
+body.is-android .set-android-only { display: block; }
+
+.about-list {
+  margin: 0;
+  padding-left: 1.1em;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--body);
+}
+
+.about-list li + li { margin-top: 6px; }
+.about-list b { color: var(--body-strong); }
+
+/* 说明/设置里那种要看起来像按钮的链接 */
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  color: var(--ink);
+  font-size: 13.5px;
+  text-decoration: none;
+}
+.btn-link:active { background: var(--tint-6); }
 
 /* 「账号」填的是直播课堂（CAS）的学号和密码。Android 上直播课表整块撤掉了，
    这个入口点进去只会让人以为哪儿没配好。要改雨课堂/学习通凭据就在各自面板里。 */

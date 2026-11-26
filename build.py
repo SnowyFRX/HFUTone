@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -37,10 +38,26 @@ def _stamp_version() -> None:
     import re
     gradle = HERE / 'android' / 'app' / 'build.gradle'
     try:
-        m = re.search(r"versionName\s+'([^']+)'", gradle.read_text('utf-8'))
+        text = gradle.read_text('utf-8')
+        m = re.search(r"versionName\s+'([^']+)'", text)
         product = m.group(1) if m else '0.0.0'
+        cm = re.search(r'versionCode\s+(\d+)', text)
+        code = int(cm.group(1)) if cm else 0
     except OSError:
-        product = '0.0.0'
+        product, code = '0.0.0', 0
+
+    # web/version.json 是「检查更新」读的当前版本，也走 jsDelivr 那条公开源。
+    # 版本号只在这里对齐，人不用两头改。
+    pkg = HERE / 'web' / 'version.json'
+    try:
+        meta = json.loads(pkg.read_text('utf-8'))
+        if str(meta.get('version') or '') != product or int(meta.get('code') or 0) != code:
+            meta['version'] = product
+            meta['code'] = code
+            pkg.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + '\n', 'utf-8')
+            print(f'[版本] web/version.json -> {product} ({code})')
+    except (OSError, ValueError):
+        pass
     now = datetime.datetime.now()
     quad = f'{now.year}, {now.month}, {now.day}, 1'
     dotted = f'{now.year}.{now.month:02d}.{now.day:02d}.1'

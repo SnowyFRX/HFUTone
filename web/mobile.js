@@ -92,9 +92,23 @@
       side.setAttribute('aria-hidden', 'false');
     }
     wireSideButton();
+    wireAbout();
 
     // ykt.js 的 DOMContentLoaded 处理器比这里先生效（脚本更早加载），
     // 延一帧再拉，保证监听器都已经绑定好。
     setTimeout(primeYkt, 60);
   });
+
+  /** 「说明」弹层：只在安卓显示，桌面没有这个按钮。 */
+  function wireAbout() {
+    var open = $('btnAbout');
+    var box = $('aboutBackdrop');
+    var close = $('aboutClose');
+    if (!open || !box) { return; }
+    open.addEventListener('click', function () { box.classList.add('open'); });
+    if (close) { close.addEventListener('click', function () { box.classList.remove('open'); }); }
+    box.addEventListener('click', function (e) {
+      if (e.target === box) { box.classList.remove('open'); }
+    });
+  }
 })();

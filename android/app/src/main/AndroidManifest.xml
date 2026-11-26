@@ -7,6 +7,9 @@
     <!-- specialUse 而不是 dataSync：Android 14 起 dataSync 前台服务 24 小时内
          累计只能跑 6 小时，超过就被 onTimeout 停掉，正好毁掉下午的课。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 电池白名单：不申请的话国产 ROM 的省电策略会把前台服务连进程一起清掉，
+         签到守护静默失效，用户还以为在跑。首次冷启动会弹一次系统对话框。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
         android:name=".App"

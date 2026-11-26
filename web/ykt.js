@@ -317,15 +317,44 @@
   function renderQuestions() {
     var row = rowById(qLesson);
     var items = (row && row._questions) || [];
-    $('yktQCount').textContent = items.length ? items.length + ' 道' : '';
-    if (!items.length) {
+    var slides = (row && row._slides) || [];
+    // 课件里预埋、还没发布的题：只摆出来给人看，不提前交（交了会被拒）
+    var pending = slides.filter(function (s) {
+      return s && s.problem && !s.problem.published
+        && !items.some(function (q) { return q.problemId === s.problem.problemId; });
+    });
+    $('yktQCount').textContent = items.length
+      ? items.length + ' 道' + (pending.length ? ' · 另有 ' + pending.length + ' 道未发布' : '')
+      : '';
+    if (!items.length && !pending.length) {
       $('yktQStage').innerHTML = '<p class="pres-empty">这节课还没有题目。老师发了题再点 ↻ 拉一次。</p>';
       return;
     }
-    $('yktQStage').innerHTML = items.map(function (q, i) {
+
+    function pageHtml(slide) {
+      if (!slide || !slide.url) { return ''; }
+      return '<img class="q-page" loading="lazy" data-i="' + slide.index + '"'
+        + ' alt="课件第 ' + (slide.index + 1) + ' 页"'
+        + ' src="/api/ykt/img?u=' + encodeURIComponent(slide.url) + '">';
+    }
+    function stemHtml(p) {
+      if (!p) { return ''; }
+      var out = p.body ? '<p class="q-stem">' + esc(p.body) + '</p>' : '';
+      if (p.options && p.options.length) {
+        out += '<ul class="q-opts">' + p.options.map(function (o) {
+          return '<li><b>' + esc(o.key || '') + '</b>' + esc(o.value || '') + '</li>';
+        }).join('') + '</ul>';
+      }
+      return out;
+    }
+
+    var cards = items.map(function (q, i) {
+      var slide = q.index >= 0 ? slides[q.index] : null;
+      var p = slide && slide.problem ? slide.problem : null;
       var badge = q.closed ? '<span class="q-badge is-closed">已收题</span>'
         : (q.answered ? '<span class="q-badge is-done">已作答</span>'
           : '<span class="q-badge">待作答</span>');
+      var dead = leftText(q) === '已超时';
       var ph = q.problemType === 2 ? '多选：A,B,C'
         : q.problemType === 3 ? '填空：多个空用逗号分隔'
           : q.problemType === 5 ? '主观题文字答案'
@@ -334,17 +363,33 @@
         + '<div class="q-head">'
         + '<span class="q-badge">' + esc(q.typeName) + '</span>'
         + badge
-        + '<span>' + esc(q.problemId) + '</span>'
+        + '<span title="' + esc(q.problemId) + '">…' + esc(q.problemId.slice(-6)) + '</span>'
         + '<span class="q-left" data-left="' + i + '">' + esc(leftText(q)) + '</span>'
         + '</div>'
+        + pageHtml(slide)
+        + stemHtml(p)
         + '<div class="q-body">'
         + '<input type="text" data-in="' + esc(q.problemId) + '" placeholder="' + esc(ph) + '">'
         + '<button type="button" data-act="send" data-pid="' + esc(q.problemId) + '"'
         + ' data-type="' + q.problemType + '" data-dt="' + q.dt + '">提交</button>'
         + '</div>'
-        + '<p class="q-note" data-note="' + esc(q.problemId) + '"></p>'
+        + '<p class="q-note" data-note="' + esc(q.problemId) + '">'
+        + (dead ? '已超时：提交会先试时限内通道，被拒再走补交通道' : '') + '</p>'
         + '</div>';
     }).join('');
+
+    var later = pending.map(function (s) {
+      return '<div class="q-card is-pending">'
+        + '<div class="q-head">'
+        + '<span class="q-badge is-closed">未发布</span>'
+        + '<span class="q-left">课件第 ' + (s.index + 1) + ' 页</span>'
+        + '</div>'
+        + pageHtml(s)
+        + stemHtml(s.problem)
+        + '</div>';
+    }).join('');
+
+    $('yktQStage').innerHTML = cards + later;
     tickQuestions();
   }
 
@@ -377,24 +422,39 @@
 
   function openQuestions(row) {
     openBackdrop('yktQBackdrop');
-    $('yktQTitle').textContent = (row.name || '课堂') + ' · 随堂题';
+    $('yktQTitle').textContent = (row.courseName || row.name || '课堂') + ' · 随堂题';
+    $('yktQTitle').title = (row.name || row.courseName || '课堂') + ' · 随堂题';
     if (qTimer) { clearInterval(qTimer); qTimer = null; }
     qTimer = setInterval(function () {
       if (!$('yktQBackdrop').classList.contains('open')) return;
       tickQuestions();
     }, 1000);
-    if (row._questions && row._questions.length) {
-      qLesson = row.lessonId;
-      renderQuestions();
-    } else {
-      loadQuestions(row.lessonId);
+
+    // 题干在课件页里（老师插入习题时连同 body/options 一起下发，未发布也有）。
+    // 先把课件拉下来，题目卡片才能带上题干和那一页的图。
+    function render() {
+      if (row._questions && row._questions.length) {
+        qLesson = row.lessonId;
+        PRES.slides = row._slides || [];       // 点题图放大时用这一份
+        renderQuestions();
+      } else {
+        PRES.slides = row._slides || [];
+        loadQuestions(row.lessonId);
+      }
     }
+    if (row._slides) { render(); return; }
+    $('yktQStage').innerHTML = '<p class="pres-empty">正在拉课件页（题干在上面）…</p>';
+    api('/api/ykt/pres?lesson=' + encodeURIComponent(row.lessonId)).then(function (d) {
+      row._slides = (d && d.ok && d.slides) || [];
+      render();
+    }, function () { row._slides = []; render(); });
   }
 
   /* --------------------------------------------------------------- 课件 */
   function openPres(row) {
     openBackdrop('yktPresBackdrop');
-    $('yktPresTitle').textContent = row.name || '课堂课件';
+    $('yktPresTitle').textContent = (row.courseName || row.name || '课堂课件');
+    $('yktPresTitle').title = row.name || row.courseName || '';
     $('yktPresCount').textContent = '正在拉取…';
     $('yktPresStage').innerHTML = '<p class="pres-empty">正在拉取课件…</p>';
     api('/api/ykt/pres?lesson=' + encodeURIComponent(row.lessonId)).then(function (d) {
@@ -403,7 +463,8 @@
         $('yktPresCount').textContent = '';
         return;
       }
-      $('yktPresTitle').textContent = d.title || row.name || '课堂课件';
+      $('yktPresTitle').textContent = d.title || row.courseName || row.name || '课堂课件';
+      $('yktPresTitle').title = row.name || d.title || '';
       var slides = d.slides || [];
       // 课件里预埋的随堂题：老师还没翻到那页、也还没点发布，服务端已经把题干
       // 和选项一起返回了。这里只做个角标提示，不提前替用户答题（发了没解锁的题

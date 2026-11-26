@@ -111,6 +111,59 @@
     });
     $('settingsDone').addEventListener('click', closeSettings);
 
+    // 关于与更新：先显示随包发布的版本，再按需检查
+    (function wireUpdate() {
+      var ver = $('updateCurrent');
+      var line = $('updateLine');
+      var btn = $('btnCheckUpdate');
+      if (!ver || !btn) { return; }
+
+      fetch('/version.json').then(function (r) { return r.json(); }).then(function (d) {
+        if (d && d.version) { ver.textContent = 'HFUTone ' + d.version; }
+      }).catch(function () { /* 读不到就保持占位 */ });
+
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        line.className = 'update-line';
+        line.textContent = '检查中…';
+        fetch('/api/update/check?force=1').then(function (r) { return r.json(); })
+          .then(function (d) {
+            btn.disabled = false;
+            if (!d || !d.ok) {
+              line.textContent = '检查失败，稍后再试';
+              return;
+            }
+            if (d.hasNew) {
+              line.className = 'update-line is-new';
+              line.innerHTML = 'v' + d.latest + ' 可用 · <a href="' + d.release +
+                '" target="_blank" rel="noopener">去下载</a>';
+              btn.hidden = true;
+            } else {
+              line.textContent = '已是最新';
+            }
+          }, function () {
+            btn.disabled = false;
+            line.textContent = '检查失败，稍后再试';
+          });
+      });
+    })();
+
+    // 设置分档：直播 / 签到 / 其他。安卓没有直播那档，按钮由 CSS 隐藏。
+    var setTabs = document.querySelectorAll('.set-tab');
+    Array.prototype.forEach.call(setTabs, function (btn) {
+      btn.addEventListener('click', function () {
+        var want = btn.getAttribute('data-pane');
+        Array.prototype.forEach.call(setTabs, function (b) {
+          var on = b.getAttribute('data-pane') === want;
+          b.classList.toggle('is-on', on);
+          b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('.set-pane'), function (p) {
+          p.hidden = p.getAttribute('data-pane') !== want;
+        });
+      });
+    });
+
     $('setAutoPlay').addEventListener('change', function () {
       saveSettings({ autoPlay: this.checked },
         this.checked ? '已开启自动推流' : '已关闭自动推流');

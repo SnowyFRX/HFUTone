@@ -38,6 +38,7 @@ import cxim                                                         # noqa: E402
 import yktapplogin                                                  # noqa: E402
 import yktqr                                                        # noqa: E402
 import autosign                                                     # noqa: E402
+import updater                                                      # noqa: E402
 
 PPT_RELAY = hfutplay.RELAY                       # PPT 抽帧转发（一路）
 
@@ -1927,6 +1928,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == '/api/settings':
             self._json({'ok': True, 'settings': read_settings()})
+            return
+        if path == '/api/update/check':
+            # force=1 是用户手动点「检查更新」，否则走 6 小时缓存
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            self._json(updater.check(HERE, force='1' in (qs.get('force') or [])))
             return
         if path == '/api/autosign/state':
             self._json(AUTOSIGN.status_payload())

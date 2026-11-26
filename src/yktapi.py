@@ -96,6 +96,9 @@ def can_retry_channel(code: int, err: str) -> bool:
         return True
     s = (err or '').upper()
     return any(k in s for k in ('50026', 'CLOSED', 'FINISHED', 'HTTP 500',
+                                # 题目已超时/已收题时，网关有时直接折成 4xx，
+                                # 拿不到业务 code；这种情况下补交通道才是唯一出路
+                                'HTTP 400', 'HTTP 403',
                                 '已收题', '超时', '时限'))
 
 

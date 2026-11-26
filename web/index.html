@@ -65,6 +65,9 @@
       <button id="btnSettings" type="button" aria-haspopup="dialog" aria-controls="settingsBackdrop">
         <span aria-hidden="true">☰</span> 设置
       </button>
+      <button id="btnAbout" type="button" aria-haspopup="dialog" aria-controls="aboutBackdrop">
+        <span aria-hidden="true">?</span> 说明
+      </button>
       <button id="btnAccount" type="button" onclick="(window.HFUTLive&&window.HFUTLive.openLogin||function(){document.getElementById('loginBackdrop').classList.add('open')})()">
         <span aria-hidden="true">◉</span> 账号
       </button>
@@ -414,7 +417,14 @@
     <h2 id="settingsTitle">设置</h2>
     <p class="lead">改完即时生效，配置存在本机 .config/settings.json。</p>
 
+    <div class="set-nav" role="tablist" aria-label="设置分类">
+      <button type="button" role="tab" class="set-tab" data-pane="live">直播</button>
+      <button type="button" role="tab" class="set-tab is-on" data-pane="sign">签到</button>
+      <button type="button" role="tab" class="set-tab" data-pane="misc">其他</button>
+    </div>
+
     <div class="set-grid">
+      <div class="set-pane" data-pane="live" hidden>
       <div class="set-group set-live-only">
         <p class="set-title">自动推流</p>
         <label class="set-row">
@@ -437,6 +447,32 @@
           <input type="checkbox" id="setStudent">
           <span><b>学生流</b><em>教室全景，无音频</em></span>
         </label>
+      </div>
+      </div>
+
+      <div class="set-pane" data-pane="sign">
+      <div class="set-group">
+        <p class="set-title">学习通位置签到坐标</p>
+        <p class="set-hint">
+          打开<b>腾讯坐标拾取器</b>点一下地图复制经纬度，保留到小数点后 6 位。
+          桌面版直接复制下面那行地址到浏览器打开：
+        </p>
+        <p class="set-url"><code>https://lbs.qq.com/getPoint/</code></p>
+        <p class="set-hint set-url-android" hidden>手机上可直接点：<a href="https://lbs.qq.com/getPoint/" id="setCxPick" target="_blank" rel="noopener">在浏览器打开</a></p>
+        <label class="cx-field">
+          <span>地点描述</span>
+          <input type="text" id="setCxAddress" spellcheck="false" placeholder="屯溪路校区 · 西二302">
+        </label>
+        <div class="cx-row2">
+          <label class="cx-field">
+            <span>纬度</span>
+            <input type="text" id="setCxLat" inputmode="decimal" step="0.000001" min="-90" max="90" placeholder="31.860123">
+          </label>
+          <label class="cx-field">
+            <span>经度</span>
+            <input type="text" id="setCxLng" inputmode="decimal" step="0.000001" min="-180" max="180" placeholder="117.280456">
+          </label>
+        </div>
       </div>
 
       <div class="set-group">
@@ -475,35 +511,68 @@
           <span class="autosign-test-msg" id="webhookTestMsg"></span>
         </div>
       </div>
+      </div>
+
+      <div class="set-pane" data-pane="misc" hidden>
+      <div class="set-group set-android-only">
+        <p class="set-title">后台保活</p>
+        <p class="set-hint">息屏后系统可能连前台服务一起清掉，签到守护就静默停了。把本应用排除出电池优化，比把轮询间隔调小更有用。</p>
+        <a class="btn-link" href="hfutone://battery">关闭电池优化</a>
+      </div>
 
       <div class="set-group">
-        <p class="set-title">学习通位置签到坐标</p>
-        <p class="set-hint">
-          打开<b>腾讯坐标拾取器</b>点一下地图复制经纬度，保留到小数点后 6 位。
-          桌面版直接复制下面那行地址到浏览器打开：
-        </p>
-        <p class="set-url"><code>https://lbs.qq.com/getPoint/</code></p>
-        <p class="set-hint set-url-android" hidden>手机上可直接点：<a href="https://lbs.qq.com/getPoint/" id="setCxPick" target="_blank" rel="noopener">在浏览器打开</a></p>
-        <label class="cx-field">
-          <span>地点描述</span>
-          <input type="text" id="setCxAddress" spellcheck="false" placeholder="屯溪路校区 · 西二302">
-        </label>
-        <div class="cx-row2">
-          <label class="cx-field">
-            <span>纬度</span>
-            <input type="text" id="setCxLat" inputmode="decimal" step="0.000001" min="-90" max="90" placeholder="31.860123">
-          </label>
-          <label class="cx-field">
-            <span>经度</span>
-            <input type="text" id="setCxLng" inputmode="decimal" step="0.000001" min="-180" max="180" placeholder="117.280456">
-          </label>
+        <p class="set-title">关于</p>
+        <div class="update-row">
+          <span class="update-ver" id="updateCurrent">HFUTone</span>
+          <button type="button" id="btnCheckUpdate">检查更新</button>
         </div>
+        <p class="update-line" id="updateLine" role="status"></p>
+      </div>
       </div>
     </div>
 
     <p class="err-line" id="settingsMsg" role="status"></p>
     <div class="sheet-actions">
       <button type="button" class="primary" id="settingsDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 说明弹层（安卓端顶栏入口） -->
+<div class="backdrop" id="aboutBackdrop" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+  <div class="sheet sheet-wide">
+    <h2 id="aboutTitle">说明</h2>
+    <p class="lead">安卓端和桌面版不是一回事，先把差异和限制说清楚。</p>
+
+    <div class="set-group">
+      <p class="set-title">和桌面版的差异</p>
+      <ul class="about-list">
+        <li>没有 HFUT 直播画面和课表：这要 HFUT 校园网加统一身份认证，且只在桌面端有，因此没有设置内置播放器。桌面版带 mpv。</li>
+        <li>自动化跑在进程里，靠常驻通知维持；进程被杀，就做不到自动签到。</li>
+      </ul>
+    </div>
+
+    <div class="set-group">
+      <p class="set-title">必须知道的四件事</p>
+      <ul class="about-list">
+        <li><b>电池优化</b>：国产 ROM 的省电策略会连前台服务一起清掉。去「设置 → 关闭电池优化」，或者系统设置里给本应用「不限制耗电 / 允许后台活动」。</li>
+        <li><b>自动签到默认是关的</b>：要在设置里手动打开。</li>
+        <li><b>人工环节不绕过</b>：验证码、手势、签到码、二维码、没配坐标的位置签到，记「需人工」。</li>
+        <li><b>地址描述</b>：坐标配置中的地址描述一定注意——你怎么描述，老师查看时看到的就是什么。</li>
+      </ul>
+    </div>
+
+    <div class="set-group">
+      <p class="set-title">其他</p>
+      <ul class="about-list">
+        <li>群聊签到靠后端的环信长连接，无论页面在不在前台；掉线时轮询自动降到 45 秒。</li>
+        <li>雨课堂的动态码兜底在手机上没课件画面可截，只能落到「需人工扫码」；这是免扫码逻辑失败时才会用到，也只有 HFUTers 在桌面端才能享受。</li>
+        <li>凭据只存在本机私有目录，不上传任何第三方服务器。</li>
+      </ul>
+    </div>
+
+    <div class="sheet-actions">
+      <button type="button" class="primary" id="aboutClose">知道了</button>
     </div>
   </div>
 </div>

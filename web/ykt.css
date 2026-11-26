@@ -703,6 +703,10 @@ body.is-side-drag .side > .side-shell { transition: none; }
 /* ------------------------------------------------------------ 课件 */
 .backdrop.ykt-pres .pres-sheet {
   width: min(1100px, 94vw);
+  max-width: 94vw;
+  /* 它是 .backdrop 的 flex item，默认 min-width:auto 会被内部网格/卡片撑开，
+     窄屏实测被顶到 452（视口 430），右侧内容直接被裁 */
+  min-width: 0;
   height: min(88vh, 900px);
   display: flex;
   flex-direction: column;
@@ -720,7 +724,16 @@ body.is-side-drag .side > .side-shell { transition: none; }
   border-bottom: 1px solid var(--hairline);
 }
 
-.pres-head h2 { margin: 0; font-size: 15px; color: var(--ink); flex: 1; }
+.pres-head h2 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .pres-count { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
 
 .pres-head button {
@@ -877,6 +890,8 @@ body.is-side-drag .side > .side-shell { transition: none; }
   border-radius: var(--r-lg);
   padding: var(--s3) var(--s4);
   margin-bottom: var(--s3);
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .q-card:last-child { margin-bottom: 0; }
@@ -902,6 +917,58 @@ body.is-side-drag .side > .side-shell { transition: none; }
 .q-badge.is-closed { background: var(--accent-soft); color: var(--accent-deep); }
 .q-badge.is-done { background: var(--live-soft); color: var(--live); }
 .q-left { margin-left: auto; }
+
+/* 题号是 19 位数字，不给它收缩空间就会把倒计时和按钮挤出卡片 */
+.q-head > span:nth-child(3) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.q-left { flex-shrink: 0; }
+
+/* 题目卡片里的课件页：题干就印在这张图上。先给缩略图，点开进单页大图 */
+.q-page {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  margin: var(--s2) 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--tint-6);
+  cursor: zoom-in;
+}
+
+.q-stem {
+  margin: var(--s2) 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--body-strong);
+  white-space: pre-wrap;
+}
+
+.q-opts {
+  margin: 0 0 var(--s2);
+  padding-left: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--body);
+}
+
+.q-opts b {
+  display: inline-block;
+  min-width: 1.6em;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+/* 课件里预埋、还没发布的题：只读，虚线边框区别于可作答的 */
+.q-card.is-pending { border-style: dashed; background: transparent; }
+.q-card.is-pending .q-page { cursor: default; }
 .q-left.is-urgent { color: var(--accent-deep); font-weight: 600; }
 
 .q-body {
@@ -913,6 +980,7 @@ body.is-side-drag .side > .side-shell { transition: none; }
 
 .q-body input {
   flex: 1;
+  min-width: 0;
   font: inherit;
   font-size: 13px;
   padding: 8px 12px;
@@ -1166,19 +1234,90 @@ body.is-side-drag .side > .side-shell { transition: none; }
 
 .sheet-wide .lead { margin-bottom: var(--s4); }
 
+/* 说明弹层没有设置面板那层 .set-grid 滚动容器，整张 sheet 自己滚，
+   否则 .sheet-wide 的 overflow:hidden 会把它直接裁掉（底下的条目永远看不到） */
+#aboutBackdrop .sheet {
+  display: block;
+  overflow-y: auto;
+}
+
 .set-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--s3);
+  display: block;                /* 分档之后由 .set-pane 自己排两列 */
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;            /* 给滚动条留一点，别压住边框 */
   min-height: 0;
 }
 
+/* 设置内的分档导航 */
+.set-nav {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 var(--s3);
+  padding: 3px;
+  border-radius: var(--r-full);
+  background: var(--tint-4);
+}
+
+.set-tab {
+  flex: 1;
+  min-height: 32px;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.set-tab.is-on {
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(28, 28, 28, .08);
+}
+
+.set-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s3);
+}
+
+.set-pane[hidden] { display: none; }
+
+/* 设置 · 关于与更新：一行版本、一个按钮、一行结果，不留多余装饰 */
+.update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.update-ver {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--muted);
+  letter-spacing: -0.2px;
+}
+
+.update-line {
+  margin: 8px 0 0;
+  min-height: 1.2em;            /* 留位，结果出来时布局不跳 */
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.update-line.is-new { color: var(--accent-deep); }
+
+.update-line a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* 窗口窄的时候退回单列 */
 @media (max-width: 780px) {
-  .set-grid { grid-template-columns: 1fr; }
+  .set-pane { grid-template-columns: 1fr; }
 }
 
 .set-group {
