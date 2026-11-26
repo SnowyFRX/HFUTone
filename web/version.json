@@ -1,6 +1,6 @@
 {
-  "version": "1.4.6",
-  "code": 26,
-  "notes": "静默检查更新、去 API 依赖、设置分档",
-  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.6"
+  "version": "1.4.7",
+  "code": 27,
+  "notes": "修更新检测：红点位置、按钮常驻、缓存跟随版本",
+  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.7"
 }

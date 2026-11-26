@@ -20,13 +20,12 @@
     var dot = $('updateDot');
     if (dot) { dot.hidden = false; }
     var line = $('updateLine');
-    var btn = $('btnCheckUpdate');
     if (line) {
       line.className = 'update-line is-new';
       line.innerHTML = 'v' + info.latest + ' 可用 · <a href="' + info.release +
         '" target="_blank" rel="noopener">去下载</a>';
     }
-    if (btn) { btn.hidden = true; }
+    // 按钮留着：用户随时可以再查一次，别因为查到新版就把入口收走
   }
 
   function run() {

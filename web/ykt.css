@@ -467,6 +467,9 @@ body.is-side-drag .side > .side-shell { transition: none; }
   box-shadow: 0 0 0 2px var(--canvas);
 }
 
+/* badge 是绝对定位，父按钮必须是定位上下文，否则会飞到顶栏右上角 */
+.head-actions button { position: relative; }
+
 /* 侧栏里的面板要收窄：按钮换行、行布局改成两行 */
 .side .ykt-panel { padding: var(--s3) var(--s5) var(--s4); }
 

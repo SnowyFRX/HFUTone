@@ -99,8 +99,13 @@ def check(web_dir: Path, force: bool = False) -> dict:
     if not force:
         try:
             hit = json.loads(cache.read_text('utf-8'))
-            if now - float(hit.get('ts') or 0) < TTL and hit.get('result'):
-                out = dict(hit['result'])
+            cached = hit.get('result') or {}
+            # 缓存必须和「当前安装的版本」对得上才用：装上新版之后，旧缓存里的
+            # current 还是老版本，继续用它就会提示一个早就不存在的"新版本"。
+            if (now - float(hit.get('ts') or 0) < TTL
+                    and cached
+                    and str(cached.get('current') or '') == str(cur['version'] or '')):
+                out = dict(cached)
                 out['cached'] = True
                 return out
         except (OSError, ValueError):

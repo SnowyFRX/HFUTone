@@ -67,6 +67,24 @@ check(not calls, '缓存命中时没有发请求')
 forced = updater.check(Path('web'), force=True)
 check(forced.get('cached') is False, 'force=True 绕过缓存')
 
+print('--- 3b. 装上新版后，旧缓存必须失效 ---')
+import tempfile as _tf
+fake = Path(_tf.mkdtemp())
+(fake / 'version.json').write_text(json.dumps({'version': '1.4.4', 'code': 0}), 'utf-8')
+
+
+def _src(*a, **k):
+    return Resp(200, json.dumps({'version': '1.4.5', 'release': 'https://x'}))
+
+
+updater.core.request = _src
+old = updater.check(fake, force=False)
+check(old.get('hasNew') is True, '本地 1.4.4 时判定有新版本')
+(fake / 'version.json').write_text(json.dumps({'version': '1.4.6', 'code': 0}), 'utf-8')
+newer = updater.check(fake, force=False)
+check(newer.get('cached') is False, '当前版本变了，缓存不命中')
+check(newer.get('hasNew') is False, '本地 1.4.6 不再提示 1.4.5')
+
 print('--- 4. 三路全挂：返回 ok=False 而不是抛异常 ---')
 updater.core.request = lambda *a, **k: Resp(0, '')
 

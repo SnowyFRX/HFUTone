@@ -142,9 +142,13 @@
               line.className = 'update-line is-new';
               line.innerHTML = 'v' + d.latest + ' 可用 · <a href="' + d.release +
                 '" target="_blank" rel="noopener">去下载</a>';
-              btn.hidden = true;
             } else {
+              line.className = 'update-line';
               line.textContent = '已是最新';
+              // 已经追平就把顶栏红点撤掉
+              window.__updatePending = null;
+              var dot = $('updateDot');
+              if (dot) { dot.hidden = true; }
             }
           }, function () {
             btn.disabled = false;
