@@ -1,6 +1,6 @@
 {
-  "version": "1.4.7",
-  "code": 27,
-  "notes": "修更新检测：红点位置、按钮常驻、缓存跟随版本",
-  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.7"
+  "version": "1.4.8",
+  "code": 28,
+  "notes": "更新主源改 @latest，发版即生效",
+  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.8"
 }

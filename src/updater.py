@@ -21,7 +21,10 @@ from pathlib import Path
 import yktcore as core
 
 SOURCES = (
-    ('jsdelivr', 'https://cdn.jsdelivr.net/gh/SnowyFRX/HFUTone@main/web/version.json'),
+    # @latest 解析到最新的 tag，发版打完 tag 立即可见；@main 有 12 小时缓存，
+    # 发版后半小时内往往还返回旧版本，只能当兜底。
+    ('jsdelivr', 'https://cdn.jsdelivr.net/gh/SnowyFRX/HFUTone@latest/web/version.json'),
+    ('jsdelivr-main', 'https://cdn.jsdelivr.net/gh/SnowyFRX/HFUTone@main/web/version.json'),
     ('atom', 'https://github.com/SnowyFRX/HFUTone/releases.atom'),
 )
 TIMEOUT = 8
