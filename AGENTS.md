@@ -59,9 +59,7 @@ git config core.hooksPath .githooks     # 指向仓库里的 .githooks/pre-commi
 
 ## 提交习惯
 
-- 一次改动一个提交，提交信息写**结论和原因**，不只写"改了啥"。
-- **提交信息用英文**（`type(scope): subject` + 英文正文）。GitHub 的提交列表只显示
-  标题，中文标题在网页和手机上显示得乱，也不方便 grep 和生成 changelog。
-  代码注释与文档仍然是中文，不动。
+- 一次改动一个提交，提交信息**要短**：标题一行说清改了什么，正文最多一两句讲原因。
+  排查过程、验证数据、长篇推理不要写进提交信息。
 - 入库前确认没有 `.config/`（含 cookie、登录日志）、`dist/`、`vendor/ffmpeg/`。
 - 常用：`git add -A && git commit -m "..."`，不要 `--amend` 已经推送过的提交。
