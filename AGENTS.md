@@ -62,9 +62,14 @@ git config core.hooksPath .githooks     # 指向仓库里的 .githooks/pre-commi
 - `1.x`（x 升级）：**新建**一个 Release。
 - `1.x.y`（y 升级）：**替换**上一个 Release——沿用同一个页面，改它的 tag、标题和
   说明，附件换成新版本，不要另开一页。
-- 发版后**立刻 purge jsDelivr**，否则 `@main` 的 12 小时缓存会让「检查更新」读到旧版本：
-  `curl -sS "https://purge.jsdelivr.net/gh/SnowyFRX/HFUTone@main/web/version.json"`
-  返回 `"status": "finished"` 即生效，8 秒后再读一次确认。
+- 发版后**立刻 purge 两条 jsDelivr 路径**（`@latest` 是主路，`@main` 是兜底），
+  否则「检查更新」会读到旧版本。实测 purge 后 12 秒即读到新版本号：
+
+  ```bash
+  curl -sS "https://purge.jsdelivr.net/gh/SnowyFRX/HFUTone@latest/web/version.json"
+  curl -sS "https://purge.jsdelivr.net/gh/SnowyFRX/HFUTone@main/web/version.json"
+  ```
+  返回 `"status": "finished"` 即生效。
 
 ## 提交习惯
 
