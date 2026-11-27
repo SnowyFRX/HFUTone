@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  签到守护的「灵动岛」布局。
+
+  折叠态通知高度是固定的（约 64dp），所以这里只放一行：
+  左侧状态点、中间主标题加一行小字、右侧补一句数量。
+  排版原则和 App 里一致：标题粗、副行小且灰、数字用等宽字体对齐。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/island_bg"
+    android:paddingStart="16dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="11dp"
+    android:paddingBottom="11dp">
+
+    <View
+        android:id="@+id/island_dot"
+        android:layout_width="8dp"
+        android:layout_height="8dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/island_dot_ok" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/island_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:letterSpacing="0.01"
+            android:maxLines="1"
+            android:text="签到守护"
+            android:textColor="#FCFBF8"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/island_detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="正在连接…"
+            android:textColor="#A8A5A0"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/island_tail"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:fontFamily="monospace"
+        android:maxLines="1"
+        android:text=""
+        android:textColor="#7A7873"
+        android:textSize="11sp" />
+</LinearLayout>

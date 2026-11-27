@@ -1,6 +1,6 @@
 {
-  "version": "1.4.10",
-  "code": 30,
-  "notes": "学习通扫码登录、App 登录按钮配色、课件缓存按课堂",
-  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.10"
+  "version": "1.5.1",
+  "code": 31,
+  "notes": "灵动岛胶囊通知、签到成功横幅",
+  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.5.1"
 }

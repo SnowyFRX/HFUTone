@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  签到成功的横幅（heads-up）。
+
+  注意：heads-up 弹出时用的是**折叠态**，高度只有六十来 dp，所以这里最多两行：
+  上面一行「已自动签到」加右侧时间，下面一行签到名称与课程。
+  再多就会被系统裁掉，看起来像排版坏了。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/island_bg"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="11dp"
+    android:paddingBottom="11dp">
+
+    <View
+        android:layout_width="3dp"
+        android:layout_height="30dp"
+        android:layout_marginEnd="13dp"
+        android:background="@drawable/alert_bar" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="已自动签到"
+            android:textColor="#FCFBF8"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.01" />
+
+        <TextView
+            android:id="@+id/alert_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text=""
+            android:textColor="#A8A5A0"
+            android:textSize="11.5sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/alert_time"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:fontFamily="monospace"
+        android:text=""
+        android:textColor="#7A7873"
+        android:textSize="11sp" />
+</LinearLayout>

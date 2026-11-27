@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 横幅左侧那道竖条：细、亮绿，比圆点更容易在暗底上被注意到 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#5FBF7F" />
+    <corners android:radius="2dp" />
+</shape>

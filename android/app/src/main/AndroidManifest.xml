@@ -10,6 +10,8 @@
     <!-- 电池白名单：不申请的话国产 ROM 的省电策略会把前台服务连进程一起清掉，
          签到守护静默失效，用户还以为在跑。首次冷启动会弹一次系统对话框。 -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Android 13 起通知是运行时权限：没有它，常驻胶囊和签到横幅都不会显示 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".App"
