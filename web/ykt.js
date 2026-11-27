@@ -451,10 +451,19 @@
   }
 
   /* --------------------------------------------------------------- 课件 */
-  function openPres(row) {
+  function openPres(row, force) {
+    presRow = row;
     openBackdrop('yktPresBackdrop');
     $('yktPresTitle').textContent = (row.courseName || row.name || '课堂课件');
     $('yktPresTitle').title = row.name || row.courseName || '';
+
+    // 课件页在一次课堂里是静态的（图片地址不会变），重复点「看课件」不该再拉一遍。
+    // 要刷新有右上角那个 ↻，或者 force=true。
+    if (!force && row._slides && row._slides.length) {
+      renderPres(row, { slides: row._slides, title: row._slidesTitle || '' });
+      return;
+    }
+
     $('yktPresCount').textContent = '正在拉取…';
     $('yktPresStage').innerHTML = '<p class="pres-empty">正在拉取课件…</p>';
     api('/api/ykt/pres?lesson=' + encodeURIComponent(row.lessonId)).then(function (d) {
@@ -463,6 +472,13 @@
         $('yktPresCount').textContent = '';
         return;
       }
+      row._slides = d.slides || [];
+      row._slidesTitle = d.title || '';
+      renderPres(row, d);
+    });
+  }
+
+  function renderPres(row, d) {
       $('yktPresTitle').textContent = d.title || row.courseName || row.name || '课堂课件';
       $('yktPresTitle').title = row.name || d.title || '';
       var slides = d.slides || [];
@@ -487,13 +503,13 @@
           + (i + 1) + ' 页" src="' + src + '">' + q + '</div>';
       }).join('');
       PRES.slides = slides;
-    });
   }
 
   /* ------------------------------------------------ 课件单页放大
      缩略图只有 240px 宽，1080p 的 PPT 缩到那个尺寸字全是糊的。
      点一页进单页大图，←/→ 翻页，Esc 或点空白退出。 */
   var PRES = { slides: [], at: 0 };
+  var presRow = null;              // 当前课件弹层属于哪个课堂，↻ 要用
 
   function pzSrc(s) {
     return s && s.url ? '/api/ykt/img?u=' + encodeURIComponent(s.url) : '';
@@ -933,6 +949,10 @@
     $('yktPresClose').addEventListener('click', function () {
       pzHide();
       closeBackdrop('yktPresBackdrop');
+    });
+
+    $('yktPresReload').addEventListener('click', function () {
+      if (presRow) { openPres(presRow, true); }
     });
 
     // 点缩略图 → 单页大图

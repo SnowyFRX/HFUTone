@@ -1,6 +1,6 @@
 {
-  "version": "1.4.8",
-  "code": 28,
-  "notes": "更新主源改 @latest，发版即生效",
-  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.8"
+  "version": "1.4.9",
+  "code": 29,
+  "notes": "课件页缓存、二维码取码说明",
+  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.4.9"
 }
