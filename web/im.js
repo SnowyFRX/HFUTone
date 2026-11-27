@@ -74,6 +74,17 @@
     setInterval(function () {
       if (!document.hidden) { pollStatus(); }
     }, 10000);
+
+    // 切后台时心跳会被系统掐掉，回来时后端的退避计时器可能正卡在 60 秒。
+    // 只在确实断开时才踢重连，别把好的连接也掐了。
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) { return; }
+      fetch('/api/cx/im/status').then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.connected) { connect(true); }
+        })
+        .catch(function () { connect(true); });
+    });
   });
 
   window.HFUToneIM = { connect: connect, poll: pollStatus, state: CORE };
