@@ -52,7 +52,9 @@ DOMAIN = 'easemob.com'
 APP_KEY = cxchat.APP_KEY          # 'cx-dev#cxstudy'
 SDK_VERSION = '3.6.3'
 OS_TYPE_OTHER = 16
-HEARTBEAT_INTERVAL = 25.0
+HEARTBEAT_INTERVAL = 20.0
+RX_IDLE_TIMEOUT = 50.0
+SIGN_ATYPES = (2, 74, 54)
 WS_MAGIC_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
 
@@ -264,13 +266,20 @@ def decode_provision_dl(buf: bytes) -> dict[str, Any]:
     return out
 
 
-def decode_unread_dl(buf: bytes) -> list[dict[str, str]]:
-    queues: list[dict[str, str]] = []
+def decode_unread_dl(buf: bytes) -> list[dict[str, Any]]:
+    queues: list[dict[str, Any]] = []
     for f, wt, v in _pb_parse(buf):
-        if f == 2 and wt == 2:             # MetaQueue
+        if f == 2 and wt == 2:             # MetaQueue {1: queue(JID), 2: n(uint32)}
+            jid = None
+            cnt = 0
             for mf, mwt, mv in _pb_parse(v):
                 if mf == 1 and mwt == 2:
-                    queues.append(decode_jid(mv))
+                    jid = decode_jid(mv)
+                elif mf == 2 and mwt == 0:
+                    cnt = int(mv)
+            if jid is not None:
+                jid['n'] = cnt
+                queues.append(jid)
     return queues
 
 
@@ -282,12 +291,13 @@ def decode_notice(buf: bytes) -> dict[str, str] | None:
 
 
 def decode_sync_dl(buf: bytes) -> dict[str, Any]:
+    # Protobuf bool 默认值为 False；置 True 会把多页未读误判成“已到末页”而漏掉最新消息
     out: dict[str, Any] = {
         'status': {'errorCode': 0, 'reason': ''},
         'metas': [],
         'nextKey': 0,
         'queue': None,
-        'isLast': True,
+        'isLast': False,
     }
     for f, wt, v in _pb_parse(buf):
         if f == 1 and wt == 2:
@@ -363,10 +373,15 @@ def decode_meta_to_activity(meta_bytes: bytes) -> dict[str, Any] | None:
     if not aid:
         return None
 
+    atype_raw = course_att.get('atype')
+    try:
+        atype_int = int(atype_raw) if atype_raw is not None else -1
+    except (TypeError, ValueError):
+        atype_int = -1
     atype_name = str(course_att.get('atypeName') or '')
     title = str(course_att.get('title') or atype_name or '签到')
     label = atype_name + title
-    if '签到' not in label:
+    if atype_int not in SIGN_ATYPES and '签到' not in label and '签退' not in label:
         return None
 
     ci = course_att.get('courseInfo')
@@ -401,6 +416,11 @@ class SimpleWebSocket:
 
     def connect(self) -> None:
         raw = socket.create_connection((self.host, self.port), timeout=self.timeout)
+        try:
+            raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            raw.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
         ctx = ssl.create_default_context()
         ssock = ctx.wrap_socket(raw, server_hostname=self.host)
         ssock.settimeout(self.timeout)
@@ -773,19 +793,28 @@ class BackendIMClient:
         self._send_pb(ws, prov_bytes)
 
         provisioned = False
+        first_unread_done = False
         last_hb = time.time()
         last_rx = time.time()
-        pending_queues: list[dict[str, str]] = []
+        # 非阻塞按队列防抖与分页计数：避免旧串行 pending_queues 因单条回包未匹配而永久死锁
+        last_sync_at: dict[tuple[str, str], float] = {}
+        page_hops: dict[tuple[str, str], int] = {}
+        last_next_key: dict[tuple[str, str], int] = {}
 
-        def _enqueue_queue(q: dict[str, str] | None) -> None:
+        def _sync_queue_now(q: dict[str, Any] | None, *, key: int = 0,
+                            force: bool = False) -> None:
             if not q or not q.get('name'):
                 return
-            key = (q.get('name'), q.get('domain'))
-            if any((x.get('name'), x.get('domain')) == key for x in pending_queues):
+            qkey = (str(q.get('name') or ''), str(q.get('domain') or ''))
+            now_t = time.time()
+            # 实时 CommNotice（force=True）始终立刻拉取；心跳 UNREAD_DL 做 2s 防抖
+            if not force and not key and now_t - last_sync_at.get(qkey, 0.0) < 2.0:
                 return
-            pending_queues.append(q)
-            if len(pending_queues) == 1:
-                self._send_pb(ws, encode_sync_queue(q))
+            last_sync_at[qkey] = now_t
+            if not key:
+                page_hops[qkey] = 0
+                last_next_key.pop(qkey, None)
+            self._send_pb(ws, encode_sync_queue(q, key=key))
 
         while not self._stop.is_set():
             # 检查登录态是否已退出
@@ -801,9 +830,9 @@ class BackendIMClient:
                     last_hb = now
                     with self.lock:
                         self._last_heartbeat = now
-                # 超过 90 秒没有任何下行帧（含 SockJS 'h' 心跳）则主动重连
-                if now - last_rx > 90.0:
-                    raise ConnectionError('心跳超时（90s 无下行）')
+                # 超过 RX_IDLE_TIMEOUT（50s）无任何下行帧则判定断流并快速重连
+                if now - last_rx > RX_IDLE_TIMEOUT:
+                    raise ConnectionError(f'心跳超时（{int(RX_IDLE_TIMEOUT)}s 无下行）')
                 continue
 
             last_rx = now
@@ -863,14 +892,21 @@ class BackendIMClient:
 
                 elif cmd == 1:                           # CommUnreadDL
                     queues = decode_unread_dl(pl)
+                    pulled = 0
                     for q in queues:
-                        _enqueue_queue(q)
-                    if queues:
+                        # 首次建连全部同步一次；后续心跳仅拉未读数 > 0 的队列
+                        if (not first_unread_done) or int(q.get('n') or 0) > 0:
+                            _sync_queue_now(q, force=not first_unread_done)
+                            pulled += 1
+                    first_unread_done = True
+                    if pulled:
                         self._send_pb(ws, encode_rebuild())
 
                 elif cmd == 2:                           # CommNotice（实时推送！）
                     q = decode_notice(pl)
-                    _enqueue_queue(q)
+                    if q and q.get('name'):
+                        core.log(f'[后端IM] 收到实时推送通知 queue={q.get("name")}')
+                        _sync_queue_now(q, force=True)
 
                 elif cmd == 0:                           # CommSyncDL（消息体！）
                     sdl = decode_sync_dl(pl)
@@ -899,18 +935,23 @@ class BackendIMClient:
                         except Exception as exc:         # noqa: BLE001
                             core.log(f'[后端IM] 分发签到事件异常：{exc}')
 
+                    # 多页未读与游标确认（ACK）：
+                    # 环信 MSYNC 返回 isLast=False 且带 nextKey 时，必须再发一次带 key=nextKey
+                    # 的 CommSyncUL 才能拉下一页并推进服务端未读游标（直到服务端回 isLast=True），
+                    # 否则未读永远滞留、后续实时 CommNotice 也会被漏推。
                     q_done = sdl.get('queue')
-                    if sdl.get('isLast'):
-                        if q_done:
-                            key = (q_done.get('name'), q_done.get('domain'))
-                            pending_queues[:] = [
-                                x for x in pending_queues
-                                if (x.get('name'), x.get('domain')) != key
-                            ]
-                        if pending_queues:
-                            self._send_pb(ws, encode_sync_queue(pending_queues[0]))
-                    elif q_done and sdl.get('nextKey'):
-                        self._send_pb(ws, encode_sync_queue(q_done, key=sdl['nextKey']))
+                    if q_done and q_done.get('name'):
+                        qkey = (str(q_done.get('name') or ''), str(q_done.get('domain') or ''))
+                        nkey = int(sdl.get('nextKey') or 0)
+                        if sdl.get('isLast'):
+                            page_hops.pop(qkey, None)
+                            last_next_key.pop(qkey, None)
+                        elif nkey and last_next_key.get(qkey) != nkey:
+                            hops = page_hops.get(qkey, 0) + 1
+                            if hops <= 30:
+                                last_next_key[qkey] = nkey
+                                page_hops[qkey] = hops
+                                _sync_queue_now(q_done, key=nkey, force=True)
 
             if provisioned and now - last_hb >= HEARTBEAT_INTERVAL:
                 self._send_pb(ws, encode_unread())
