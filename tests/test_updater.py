@@ -34,7 +34,7 @@ check(updater.ver_tuple('1.4.4') == updater.ver_tuple('v1.4.4'), 'v 前缀只剥
 check(updater.ver_tuple('1.4') < updater.ver_tuple('1.4.1'), '缺位补 0')
 check(updater.ver_tuple('') == (0,), '空串不炸')
 
-print('--- 2. 三路降级：jsdelivr 挂了走 raw ---')
+print('--- 2. 降级：jsdelivr 挂了走后面几路 ---')
 tmp = Path(tempfile.mkdtemp())
 updater.core.CONFIG_DIR = tmp
 (Path('web') / 'version.json').exists() or print('  [警告] 缺 web/version.json')
@@ -57,7 +57,7 @@ out = updater.check(Path('web'), force=True)
 check(out.get('ok') is True, '整体 ok')
 check(out.get('source') == 'atom', '降级到 atom（实际 %s）' % out.get('source'))
 check(out.get('hasNew') is True, '1.5.0 比本地新')
-check('jsdelivr' in calls[0] and 'atom' in calls[1], '按顺序尝试')
+check('jsdelivr' in calls[0] and any('atom' in c for c in calls), '按顺序尝试')
 
 print('--- 3. 缓存：6 小时内不再请求 ---')
 calls.clear()

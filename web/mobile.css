@@ -403,6 +403,12 @@ body.is-android .set-android-only { display: block; }
 .about-list li + li { margin-top: 6px; }
 .about-list b { color: var(--body-strong); }
 
+.about-list a {
+  color: var(--accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* 说明/设置里那种要看起来像按钮的链接 */
 .btn-link {
   display: inline-flex;

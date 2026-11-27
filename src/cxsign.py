@@ -808,8 +808,10 @@ class CxSigner:
 
         学习通签到码的 URL 长这样：
           https://mobilelearn.chaoxing.com/widget/sign/e?id=<activeId>&c=<code>&enc=<enc>
-        解析完还要拿 signDetail 复核一遍 code 没过期——原项目就这么做的，
-        少了这步会把过期码提交上去换一个「签到失败，请重新扫描」。
+
+        签到接口只认 enc，c（signCode）只是老师那边的展示码。所以 c 过期
+        不影响提交——原来这里 c 对不上就直接拦，等于把本来能签的路堵死了。
+        现在只把过期标出来，让上层决定提不提交。
         """
         import urllib.parse
 
@@ -827,11 +829,12 @@ class CxSigner:
         if not aid or not enc:
             return {}, '签到码缺 id 或 enc'
 
+        expired = False
         try:
             detail = self.api.sign_detail(aid, code)
+            server_code = str(detail.get('signCode') or '')
+            expired = bool(server_code and code and code != server_code)
         except Exception as exc:                           # noqa: BLE001
-            return {}, f'复核签到码失败：{exc}'
-        server_code = str(detail.get('signCode') or '')
-        if server_code and code and code != server_code:
-            return {}, '二维码已过期'
-        return {'activeId': aid, 'enc': enc, 'code': code}, ''
+            core.log(f'[学习通] 签到码复核失败（不影响提交）：{exc}')
+        return {'activeId': aid, 'enc': enc, 'code': code,
+                'expired': expired}, ''

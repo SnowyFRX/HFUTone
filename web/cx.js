@@ -722,12 +722,17 @@
         //   2) 截图/图片粘进来（走 /api/cx/qr_image，OpenCV 解码）
         //   3) 手机扫码后把链接粘进来（走 /api/cx/qr_parse）
         askInput('二维码',
-          '把二维码图片粘贴/拖进这个框，或粘手机扫码后看到的链接。',
+          '把二维码图片粘贴/拖进这个框，或粘链接。手里只有截图、又不想在这里粘图片？'
+          + '可以先到 https://cli.im/deqr 把图解析成链接再粘进来。'
+          + '学习通只认链接里的 enc，展示码过期了也能签。',
           'Ctrl+V 粘截图，或 https://mobilelearn.chaoxing.com/widget/sign/e?id=...',
           function (v) {
             if (/^https?:\/\//i.test(v)) {
               api('/api/cx/qr_parse', { text: v }).then(function (p) {
                 if (p && p.ok && p.data) {
+                  if (p.data.expired) {
+                    toast('展示码已过期，但链接里的 enc 仍有效，照常提交', 'warn');
+                  }
                   signOne(item, mergeExtra(ex, { enc: p.data.enc, code: p.data.code || '' }));
                 } else {
                   toast((p && p.error) || '二维码解析失败', 'warn');
