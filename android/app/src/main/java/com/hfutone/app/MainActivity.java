@@ -61,6 +61,31 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    /** 跳到本应用「签到提醒」通道的通知设置页。
+
+     Android 没有"请求悬浮通知"的 API：heads-up 开关归系统设置，应用只能把
+     用户送到那一页，开不开由他自己点。这里用 ACTION_CHANNEL_NOTIFICATION_SETTINGS
+     直达具体通道，省得他从应用通知列表里翻。
+     */
+    private void openChannelSettings() {
+        try {
+            Intent i = new Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS);
+            i.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+            i.putExtra(Settings.EXTRA_CHANNEL_ID, "hfutone_event_v2");
+            startActivity(i);
+        } catch (Throwable t) {
+            // 个别 ROM 不认 channel 级 Intent，退回应用级通知设置
+            Log.w(TAG, "通道设置页打不开：" + t);
+            try {
+                Intent i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                i.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+                startActivity(i);
+            } catch (Throwable ignored) {
+                // 打不开就算了，不能因此崩
+            }
+        }
+    }
+
     /** 跳系统设置让用户把本应用从电池优化里排除。首次自动弹，设置页也能手动点。 */
     private void openBatterySettings() {
         try {
@@ -109,6 +134,17 @@ public class MainActivity extends Activity {
                 // 设置页的「关闭电池优化」走这个内部 scheme，不经过系统浏览器
                 if (url != null && url.startsWith("hfutone://battery")) {
                     openBatterySettings();
+                    return true;
+                }
+                // 设置页的「允许悬浮提醒」：跳「显示在其他应用上层」授权页
+                if (url != null && url.startsWith("hfutone://overlay")) {
+                    OverlayAlert.requestPermission(MainActivity.this);
+                    return true;
+                }
+                // 「通知设置」：直达本应用「签到提醒」通道页，用户在那里开悬浮通知。
+                // 通道 id 与 KeepAliveService.EVENT_CHANNEL 保持一致。
+                if (url != null && url.startsWith("hfutone://notify")) {
+                    openChannelSettings();
                     return true;
                 }
                 if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {

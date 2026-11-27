@@ -538,6 +538,13 @@
         <a class="btn-link" href="hfutone://battery">关闭电池优化</a>
       </div>
 
+      <div class="set-group set-android-only">
+        <p class="set-title">悬浮提醒</p>
+        <p class="set-hint">签到成功要从屏幕上方弹一条横幅，得先允许「显示在其他应用上层」。这个和通知设置里的「悬浮通知」无关，开着它就不受厂家默认关闭的影响。</p>
+        <a class="btn-link" href="hfutone://overlay">允许悬浮提醒</a>
+        <a class="btn-link" href="hfutone://notify">打开通知设置</a>
+      </div>
+
       <div class="set-group">
         <p class="set-title">关于</p>
         <div class="update-row">
@@ -571,9 +578,10 @@
     </div>
 
     <div class="set-group">
-      <p class="set-title">必须知道的四件事</p>
+      <p class="set-title">必须知道的五件事</p>
       <ul class="about-list">
         <li><b>电池优化</b>：国产 ROM 的省电策略会连前台服务一起清掉。去「设置 → 关闭电池优化」，或者系统设置里给本应用「不限制耗电 / 允许后台活动」。</li>
+        <li><b>通知</b>：系统设置里要允许本应用通知；签到成功要弹横幅的话，还得把「悬浮通知」打开——不少 ROM 默认是关的，关着就只有状态栏，不会弹出来。</li>
         <li><b>自动签到默认是关的</b>：要在设置里手动打开。</li>
         <li><b>人工环节不绕过</b>：学习通的人机验证码、手势、签到码、没配坐标的位置签到，记「需人工」。<b>二维码签到例外</b>——无论是否动态，只要给出二维码（过期的也可以）或它解析后的链接，提交即可完成签到。手里只有图片时，可先到 <a href="https://cli.im/deqr" target="_blank" rel="noopener">cli.im/deqr</a> 解成链接。</li>
         <li><b>地址描述</b>：坐标配置中的地址描述需要注意——你怎么描述，老师查看时看到的就是什么。</li>

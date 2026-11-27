@@ -1,6 +1,6 @@
 {
-  "version": "1.5.1",
-  "code": 31,
-  "notes": "灵动岛胶囊通知、签到成功横幅",
-  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.5.1"
+  "version": "1.5.2",
+  "code": 32,
+  "notes": "修通知点击崩溃、通道重建、悬浮窗提醒",
+  "release": "https://github.com/SnowyFRX/HFUTone/releases/tag/v1.5.2"
 }

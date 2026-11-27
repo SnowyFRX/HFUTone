@@ -2,9 +2,8 @@
 <!--
   签到成功的横幅（heads-up）。
 
-  注意：heads-up 弹出时用的是**折叠态**，高度只有六十来 dp，所以这里最多两行：
-  上面一行「已自动签到」加右侧时间，下面一行签到名称与课程。
-  再多就会被系统裁掉，看起来像排版坏了。
+  同样只用 RemoteViews 白名单控件：左侧那道竖条是 ImageView，不是裸 <View>。
+  heads-up 弹出用的是折叠态，高度只有六十来 dp，所以最多两行。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -17,11 +16,12 @@
     android:paddingTop="11dp"
     android:paddingBottom="11dp">
 
-    <View
+    <ImageView
         android:layout_width="3dp"
         android:layout_height="30dp"
         android:layout_marginEnd="13dp"
-        android:background="@drawable/alert_bar" />
+        android:contentDescription="@null"
+        android:src="@drawable/alert_bar" />
 
     <LinearLayout
         android:layout_width="0dp"
@@ -32,12 +32,12 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:letterSpacing="0.01"
             android:maxLines="1"
             android:text="已自动签到"
             android:textColor="#FCFBF8"
             android:textSize="14sp"
-            android:textStyle="bold"
-            android:letterSpacing="0.01" />
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/alert_name"

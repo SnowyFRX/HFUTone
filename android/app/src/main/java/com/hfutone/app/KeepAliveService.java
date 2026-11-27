@@ -44,8 +44,13 @@ import java.nio.charset.StandardCharsets;
  */
 public class KeepAliveService extends Service {
     private static final String TAG = "HFUTone";
-    private static final String CHANNEL = "hfutone_status";
-    private static final String EVENT_CHANNEL = "hfutone_event";
+    /**
+     * 通道 id 带 v2 后缀是有原因的：通知通道的「重要性」一旦创建就不能改，
+     * 旧版用 IMPORTANCE_LOW 建过一次，那条通道会被系统塞进「更多通知」折叠区，
+     * 悬浮通知也默认关掉。只能换个 id 重建，让设置回到默认。
+     */
+    private static final String CHANNEL = "hfutone_status_v2";
+    private static final String EVENT_CHANNEL = "hfutone_event_v2";
     private static final int NOTIFY_ID = 1;
     /** 事件横幅用独立的 id 段，绝不能和常驻那条撞 */
     private static final int EVENT_ID_BASE = 100;
@@ -75,11 +80,23 @@ public class KeepAliveService extends Service {
         nm = getSystemService(NotificationManager.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL, "运行状态", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL, "签到守护", NotificationManager.IMPORTANCE_DEFAULT);
+            // DEFAULT 而不是 LOW：LOW 会被系统收进「更多通知」折叠区，看不见。
+            // 声音和振动单独关掉，这样它在主区但不出声。
+            ch.setSound(null, null);
+            ch.enableVibration(false);
             ch.setShowBadge(false);
             NotificationManager m = getSystemService(NotificationManager.class);
-            if (m != null && m.getNotificationChannel(CHANNEL) == null) {
-                m.createNotificationChannel(ch);
+            if (m != null) {
+                try {
+                    // 清掉旧 id 的通道，免得设置页里留两行
+                    m.deleteNotificationChannel("hfutone_status");
+                } catch (Throwable ignored) {
+                    // 删不掉就算了
+                }
+                if (m.getNotificationChannel(CHANNEL) == null) {
+                    m.createNotificationChannel(ch);
+                }
             }
 
             // 签到成功要弹横幅（heads-up），必须单独一个 HIGH 通道：
@@ -88,8 +105,16 @@ public class KeepAliveService extends Service {
                     EVENT_CHANNEL, "签到提醒", NotificationManager.IMPORTANCE_HIGH);
             ev.setShowBadge(true);
             ev.enableVibration(true);
-            if (m != null && m.getNotificationChannel(EVENT_CHANNEL) == null) {
-                m.createNotificationChannel(ev);
+            ev.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            if (m != null) {
+                try {
+                    m.deleteNotificationChannel("hfutone_event");
+                } catch (Throwable ignored) {
+                    // 删不掉就算了
+                }
+                if (m.getNotificationChannel(EVENT_CHANNEL) == null) {
+                    m.createNotificationChannel(ev);
+                }
             }
         }
     }
@@ -120,7 +145,9 @@ public class KeepAliveService extends Service {
         }
 
         Intent open = new Intent(this, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // singleTask 已在 manifest 声明，这里只要把它带到前台；用 NEW_TASK 另起
+        // 任务在部分 ROM 上点通知会直接崩。
+        open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         int piFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;
@@ -133,6 +160,9 @@ public class KeepAliveService extends Service {
                 .setContentIntent(pi)
                 .setOngoing(true)
                 .setShowWhen(false)
+                // 归类成「服务」类，别让系统把它塞进「其他通知」
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
                 .setPriority(Notification.PRIORITY_LOW);
 
         try {
@@ -141,7 +171,8 @@ public class KeepAliveService extends Service {
             v.setTextViewText(R.id.island_detail, detail);
             v.setTextViewText(R.id.island_tail, tail);
             v.setImageViewResource(R.id.island_dot, dot);
-            v.setOnClickPendingIntent(R.id.island_title, pi);
+            // 不给子控件单独绑 PendingIntent：整条通知已经有 setContentIntent，
+            // 子控件再绑一次在某些 ROM 上会在点击时崩。
             b.setCustomContentView(v);
         } catch (Throwable t) {
             // 个别 ROM 拦自定义布局，退回系统默认样式，别让服务起不来
@@ -258,6 +289,12 @@ public class KeepAliveService extends Service {
         String detail = e.optString("detail", "");
         String who = name + (detail.isEmpty() ? "" : " · " + detail);
 
+        // 先试悬浮窗：它不受「悬浮通知」开关影响，能真的从屏幕上方弹出来。
+        // 弹成了就不再发通知横幅，免得同一件事提示两次。
+        if (OverlayAlert.show(this, who)) {
+            return;
+        }
+
         Notification.Builder b;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             b = new Notification.Builder(this, EVENT_CHANNEL);
@@ -267,7 +304,9 @@ public class KeepAliveService extends Service {
         }
 
         Intent open = new Intent(this, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        // singleTask 已在 manifest 声明，这里只要把它带到前台；用 NEW_TASK 另起
+        // 任务在部分 ROM 上点通知会直接崩。
+        open.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         int piFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;

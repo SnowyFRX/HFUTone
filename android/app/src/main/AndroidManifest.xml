@@ -12,6 +12,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Android 13 起通知是运行时权限：没有它，常驻胶囊和签到横幅都不会显示 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 签到成功的横幅走悬浮窗自绘，不依赖通知系统的「悬浮通知」开关 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".App"

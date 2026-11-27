@@ -2,9 +2,11 @@
 <!--
   签到守护的「灵动岛」布局。
 
-  折叠态通知高度是固定的（约 64dp），所以这里只放一行：
-  左侧状态点、中间主标题加一行小字、右侧补一句数量。
-  排版原则和 App 里一致：标题粗、副行小且灰、数字用等宽字体对齐。
+  RemoteViews 只认白名单里的控件：LinearLayout / TextView / ImageView / ...
+  **不能**用裸 <View>，那不是白名单控件，解析时会抛异常——表现就是通知能显示、
+  一点就崩。圆点因此改用 ImageView（setImageViewResource 设 src）。
+
+  折叠态通知高度固定（约 64dp），所以只放一行：左圆点、中间两行、右侧数字。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -17,12 +19,13 @@
     android:paddingTop="11dp"
     android:paddingBottom="11dp">
 
-    <View
+    <ImageView
         android:id="@+id/island_dot"
         android:layout_width="8dp"
         android:layout_height="8dp"
         android:layout_marginEnd="12dp"
-        android:background="@drawable/island_dot_ok" />
+        android:contentDescription="@null"
+        android:src="@drawable/island_dot_ok" />
 
     <LinearLayout
         android:layout_width="0dp"
