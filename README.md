@@ -14,10 +14,10 @@ Windows 一个 `HFUTone.exe`，Android 一个 apk，两端共用同一套业务�
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `HFUTone-1.4.9-win64.zip` | 解压到任意目录，双击 `HFUTone.exe`。免安装、无依赖 |
-| Android | `HFUTone-1.4.9-release.apk` | 应用内版本 **1.4.9**（versionCode 29），支持 arm64 / x86_64，Android 7.0+ |
+| Windows x64 | `HFUTone-1.4.10-win64.zip` | 解压到任意目录，双击 `HFUTone.exe`。免安装、无依赖 |
+| Android | `HFUTone-1.4.10-release.apk` | 应用内版本 **1.4.10**（versionCode 30），支持 arm64 / x86_64，Android 7.0+ |
 
-> 安卓装完请到「设置 → 应用 → HFUTone」确认版本是 **1.4.9**。显示的比这个旧，说明装的是旧包，卸载重装一次。
+> 安卓装完请到「设置 → 应用 → HFUTone」确认版本是 **1.4.10**。显示的比这个旧，说明装的是旧包，卸载重装一次。
 
 ## 安装
 
@@ -180,7 +180,7 @@ Windows 一个 `HFUTone.exe`，Android 一个 apk，两端共用同一套业务�
 ## 常见问题
 
 **装上图标还是那个安卓小机器人 / 版本显示 1.1？**
-装的是旧包。先卸载再安装 Release 里的最新 apk，应用信息里应显示 1.4.9。
+装的是旧包。先卸载再安装 Release 里的最新 apk，应用信息里应显示 1.4.10。
 
 **人机验证滑完了窗口不回去？**
 1.1.1 起已修（现在发码按钮还会显示「已发送 60s」）。更早的版本会卡在验证页，只能点「回窗口」手动退出。

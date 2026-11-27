@@ -492,6 +492,26 @@ body.is-side-drag .side > .side-shell { transition: none; }
   font-size: 12px;
 }
 
+/* 「App 登录」和「刷新课程」是同一排的并列入口，不该一个深底一个白底：
+   深底那块在一片米色界面里看着就是"发黑"。统一成普通按钮。 */
+.side .ykt-actions button.primary {
+  background: var(--canvas);
+  border-color: var(--hairline);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.side .ykt-actions button.primary:hover:not(:disabled) {
+  background: var(--tint-4);
+  border-color: var(--hairline-strong);
+  box-shadow: none;
+}
+
+.side .ykt-actions button.primary:active:not(:disabled) {
+  background: var(--tint-6);
+  opacity: 1;
+}
+
 .side .ykt-title h2 { font-size: 18px; }
 
 .side .ykt-row {
@@ -1500,6 +1520,64 @@ body.is-side-drag .side > .side-shell { transition: none; }
 }
 
 .cx-form { display: flex; flex-direction: column; gap: var(--s3); }
+
+/* 学习通登录：扫码 / 账号密码 两种方式 */
+.cx-login-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 var(--s3);
+  padding: 3px;
+  border-radius: var(--r-full);
+  background: var(--tint-4);
+}
+
+.cx-login-tab {
+  flex: 1;
+  min-height: 32px;
+  border: 0;
+  background: none;
+  border-radius: var(--r-full);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.cx-login-tab.is-on {
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(28, 28, 28, .08);
+}
+
+.cx-qr-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) 0 var(--s2);
+}
+
+.cx-qr-box img {
+  width: 200px;
+  height: 200px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: #fff;
+  cursor: pointer;
+}
+
+.cx-qr-hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* .cx-form / .cx-qr-box 自己带 display，会压掉 [hidden]{display:none} */
+#cxQrPane[hidden],
+#cxPwdPane[hidden] {
+  display: none !important;
+}
 
 .cx-field { display: flex; flex-direction: column; gap: 6px; }
 

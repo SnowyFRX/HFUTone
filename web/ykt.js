@@ -317,7 +317,7 @@
   function renderQuestions() {
     var row = rowById(qLesson);
     var items = (row && row._questions) || [];
-    var slides = (row && row._slides) || [];
+    var slides = (PRES_CACHE[qLesson] || {}).slides || [];
     // 课件里预埋、还没发布的题：只摆出来给人看，不提前交（交了会被拒）
     var pending = slides.filter(function (s) {
       return s && s.problem && !s.problem.published
@@ -435,19 +435,19 @@
     function render() {
       if (row._questions && row._questions.length) {
         qLesson = row.lessonId;
-        PRES.slides = row._slides || [];       // 点题图放大时用这一份
+        PRES.slides = (PRES_CACHE[row.lessonId] || {}).slides || [];  // 点题图放大时用这一份
         renderQuestions();
       } else {
-        PRES.slides = row._slides || [];
+        PRES.slides = (PRES_CACHE[row.lessonId] || {}).slides || [];
         loadQuestions(row.lessonId);
       }
     }
-    if (row._slides) { render(); return; }
+    if (PRES_CACHE[row.lessonId]) { render(); return; }
     $('yktQStage').innerHTML = '<p class="pres-empty">正在拉课件页（题干在上面）…</p>';
     api('/api/ykt/pres?lesson=' + encodeURIComponent(row.lessonId)).then(function (d) {
-      row._slides = (d && d.ok && d.slides) || [];
+      PRES_CACHE[row.lessonId] = { slides: (d && d.ok && d.slides) || [], title: (d && d.title) || '' };
       render();
-    }, function () { row._slides = []; render(); });
+    }, function () { PRES_CACHE[row.lessonId] = { slides: [], title: '' }; render(); });
   }
 
   /* --------------------------------------------------------------- 课件 */
@@ -458,9 +458,11 @@
     $('yktPresTitle').title = row.name || row.courseName || '';
 
     // 课件页在一次课堂里是静态的（图片地址不会变），重复点「看课件」不该再拉一遍。
-    // 要刷新有右上角那个 ↻，或者 force=true。
-    if (!force && row._slides && row._slides.length) {
-      renderPres(row, { slides: row._slides, title: row._slidesTitle || '' });
+    // 缓存必须按 lessonId 存在模块级，不能挂在 row 上：pull() 每 15 秒用服务端
+    // 返回的新对象整个替换 state.lessons，挂在 row 上的字段下一轮就没了。
+    var cached = PRES_CACHE[row.lessonId];
+    if (!force && cached && cached.slides && cached.slides.length) {
+      renderPres(row, cached);
       return;
     }
 
@@ -472,8 +474,7 @@
         $('yktPresCount').textContent = '';
         return;
       }
-      row._slides = d.slides || [];
-      row._slidesTitle = d.title || '';
+      PRES_CACHE[row.lessonId] = { slides: d.slides || [], title: d.title || '' };
       renderPres(row, d);
     });
   }
@@ -509,6 +510,7 @@
      缩略图只有 240px 宽，1080p 的 PPT 缩到那个尺寸字全是糊的。
      点一页进单页大图，←/→ 翻页，Esc 或点空白退出。 */
   var PRES = { slides: [], at: 0 };
+  var PRES_CACHE = {};        // lessonId -> {slides, title}，课件页是静态的
   var presRow = null;              // 当前课件弹层属于哪个课堂，↻ 要用
 
   function pzSrc(s) {

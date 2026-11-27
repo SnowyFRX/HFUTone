@@ -623,7 +623,9 @@ class State:
             u, p = read_creds()
             self.username = u
             if not u or not p:
-                raise HfutLiveError('还没有保存学号和密码，点右上角「账号」填一下。')
+                raise HfutLiveError(
+                    '还没有保存学号和密码。安卓端没有直播课表，这个功能不用配；'
+                    '桌面端点右上角「账号」填一下。')
             self.api = HfutLive(u, p)
         return self.api
 
@@ -1084,6 +1086,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def _json(self, obj, code: int = 200):
+        # _send 已经统一带了 Cache-Control: no-store，这里不用再加
         self._send(code, json.dumps(obj, ensure_ascii=False).encode('utf-8'),
                    'application/json; charset=utf-8')
 
@@ -1167,12 +1170,37 @@ class Handler(BaseHTTPRequestHandler):
                 if not data['uuid']:
                     self._json({'ok': False, 'error': '取二维码失败'})
                     return
+                # 只回 uuid：图片让前端单独请求。合成一次返回看着省往返，
+                # 实际是把 refreshQRCode(1.9s) 和 createqr(0.4s) 串起来等，
+                # 用户感知反而更慢。
                 self._json({'ok': True, 'uuid': data['uuid'], 'enc': data['enc']})
             except Exception as e:                   # noqa: BLE001
                 with CX.lock:
                     CX.qr_state = 'error'
                     CX.qr_msg = friendly_error(e)
                 self._json({'ok': False, 'error': friendly_error(e)})
+            return
+
+        if path == '/api/cx/qr/img':
+            # createqr 直接给图片（270x270 PNG），前端拿 <img> 显示就行，
+            # 不需要在浏览器里画二维码。带 Referer 才给，所以走本地代理。
+            u = one('uuid')
+            if not u:
+                self._send(400, b'need uuid', 'text/plain; charset=utf-8')
+                return
+            url = (cxapi.PASSPORT + '/createqr?' +
+                   urllib.parse.urlencode({'uuid': u, 'fid': '-1', 'type': '3'}))
+            # 必须带上取码时的会话 cookie：createqr 用匿名会话会被服务端当成
+            # 另一个会话，轮询那边立刻回「会话已失效」。
+            try:
+                raw = yktcore.fetch_bytes(url, referer=cxapi.PASSPORT + '/login',
+                                          cookie=CX.signer.api.cookie, timeout=20)
+            except Exception:                        # noqa: BLE001
+                raw = None
+            if not raw:
+                self._send(502, b'no image', 'text/plain; charset=utf-8')
+                return
+            self._send(200, raw, 'image/png')
             return
 
         if path == '/api/cx/qr/poll':
@@ -1191,7 +1219,7 @@ class Handler(BaseHTTPRequestHandler):
             with CX.lock:
                 CX.qr_state = state
                 CX.qr_msg = msg
-                if state in ('ok', 'fail'):
+                if state in ('ok', 'fail', 'expired'):
                     CX.qr_uuid = ''
             if state == 'ok':
                 CX_IM.notify_login_changed()

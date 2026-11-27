@@ -379,8 +379,25 @@
 <div class="backdrop" id="cxLoginBackdrop" role="dialog" aria-modal="true" aria-labelledby="cxLoginTitle">
   <div class="sheet">
     <h2 id="cxLoginTitle">登录学习通</h2>
-    <p class="lead">账号密码走的是学习通网页登录口，和你在浏览器里登录是同一套流程。</p>
-    <div class="cx-form">
+    <p class="lead">手机学习通扫码，或者用账号密码。密码走的是学习通网页登录口，和浏览器里登录是同一套。</p>
+
+    <div class="cx-login-tabs" role="tablist">
+      <button type="button" class="cx-login-tab is-on" data-mode="qr" role="tab">扫码登录</button>
+      <button type="button" class="cx-login-tab" data-mode="pwd" role="tab">账号密码</button>
+    </div>
+
+    <div class="cx-qr-pane" id="cxQrPane">
+      <div class="cx-qr-box">
+        <img id="cxQrImg" alt="学习通登录二维码" hidden>
+        <p class="cx-qr-hint" id="cxQrHint">点下面的「取二维码」</p>
+      </div>
+      <p class="err-line" id="cxQrMsg" role="status"></p>
+      <div class="sheet-actions">
+        <button type="button" id="cxQrRefresh">取二维码</button>
+      </div>
+    </div>
+
+    <div class="cx-form" id="cxPwdPane" hidden>
       <label class="cx-field">
         <span>手机号 / 账号</span>
         <input type="text" id="cxPhone" autocomplete="username" spellcheck="false" placeholder="13800138000">
@@ -393,7 +410,7 @@
     <p class="err-line" id="cxLoginMsg" role="alert"></p>
     <div class="sheet-actions">
       <button type="button" id="cxLoginCancel">取消</button>
-      <button type="button" class="primary" id="cxLoginSubmit">登录</button>
+      <button type="button" class="primary" id="cxLoginSubmit" hidden>登录</button>
     </div>
   </div>
 </div>

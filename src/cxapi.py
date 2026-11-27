@@ -307,15 +307,28 @@ class Cx:
             'enc': enc, 'uuid': qr_uuid,
             'doubleFactorLogin': '0', 'forbidotherlogin': '0',
         }, with_headers=True)
-        self._absorb_cookies(r)
+        # 只有确认登录成功才吸收 cookie。每次轮询都合并 Set-Cookie 会让会话
+        # 一直漂移，服务端那边挂在 uuid 上的状态就跟着失效——日志里那些
+        # 「二维码已失效 / 会话已失效」就是这么来的。
         d = self._json(r)
-        status = d.get('status')
-        if status is True or str(status) == '2' or d.get('url'):
+        core.log(f'[学习通] 扫码状态：{str(d)[:160]}')
+        st = d.get('status')
+        typ = str(d.get('type') or '')
+        # 服务端这一版返回的 status 可能是 true、'true' 或 1，别只认布尔
+        ok_flag = (st is True or str(st).strip().lower() in ('true', '1', 'ok')
+                   or bool(d.get('url')))
+        if ok_flag:
+            self._absorb_cookies(r)
             ok, msg = self.refresh_user()
             return ('ok', '登录成功') if ok else ('fail', msg)
-        if str(status) == '1':
+        if typ == '2':
+            # 二维码失效。照 course_helper 的判据：type=2 要立刻换一张，
+            # 不能当成「继续等待」，否则前端会一直等一个死码。
+            return 'expired', str(d.get('mes') or '二维码已失效')
+        if typ == '1':
             return 'scanned', '已扫码，请在手机上确认'
-        return 'waiting', str(d.get('msg') or '等待扫码')
+        # type=3 是「未登录」，也就是还没扫；别把服务端那句"未登录"直接显示出来
+        return 'waiting', '等待扫码'
 
     def refresh_user(self) -> tuple[bool, str]:
         """拉用户信息。顺带把 RSA 解出来的 sc/cid 存下来——签到签名要它。"""

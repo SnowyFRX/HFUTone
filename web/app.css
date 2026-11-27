@@ -258,8 +258,10 @@ button.primary {
   box-shadow: var(--inset-dark);
 }
 button.primary:hover:not(:disabled) {
-  background: #2a2a28;
-  border-color: #2a2a28;
+  /* 原来 #2a2a28 和 --ink(#1c1c1c) 几乎一样黑，hover 看着就是一整块死黑。
+     提亮一档，让它有"浮起来"的层次。 */
+  background: #35342f;
+  border-color: #35342f;
   box-shadow: var(--inset-dark), var(--focus-shadow);
 }
 button.primary:active:not(:disabled) { opacity: 0.86; }

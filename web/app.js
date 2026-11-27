@@ -695,6 +695,9 @@
 
   async function load(force) {
     if (state.busy) return;
+    // 安卓端没有直播课表（校园网 + CAS 那套），整块界面也撤掉了。
+    // 还去打 /api/state 只会让后端去读直播凭据，然后弹一句指向不存在按钮的提示。
+    if (document.body.classList.contains('is-android')) { return; }
     state.busy = true;
     refreshBtn.disabled = true;
     playBtn.disabled = true;

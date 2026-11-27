@@ -30,11 +30,13 @@
   }
 
   function api(path, body) {
-    var opt = body === undefined ? {} : {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    };
+    var opt = body === undefined
+      ? { cache: 'no-store' }        // 登录态之类的 GET 绝不能被浏览器缓存
+      : {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        };
     return fetch(path, opt).then(function (r) {
       return r.json().catch(function () { return { ok: false, error: 'HTTP ' + r.status }; });
     }, function (e) {
@@ -199,14 +201,115 @@
   }
 
   /* --------------------------------------------------------------- 登录 */
+  var QR = { uuid: '', timer: 0, mode: 'qr' };
+
+  function qrMode(mode) {
+    QR.mode = mode;
+    var tabs = document.querySelectorAll('.cx-login-tab');
+    Array.prototype.forEach.call(tabs, function (b) {
+      var on = b.getAttribute('data-mode') === mode;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if ($('cxQrPane')) { $('cxQrPane').hidden = mode !== 'qr'; }
+    if ($('cxPwdPane')) { $('cxPwdPane').hidden = mode !== 'pwd'; }
+    if ($('cxLoginSubmit')) { $('cxLoginSubmit').hidden = mode !== 'pwd'; }
+    if (mode === 'qr') {
+      if (!QR.uuid) { qrFetch(); }
+      var el = $('cxQrRefresh');
+      if (el && !QR.uuid) { el.textContent = '取二维码'; }
+    } else {
+      qrStop();
+      var phone = $('cxPhone');
+      if (phone) { setTimeout(function () { phone.focus(); }, 60); }
+    }
+  }
+
+  function qrStop() {
+    if (QR.timer) { clearInterval(QR.timer); QR.timer = 0; }
+  }
+
+  function qrFetch() {
+    qrStop();
+    var img = $('cxQrImg');
+    var hint = $('cxQrHint');
+    var msg = $('cxQrMsg');
+    if (msg) { msg.textContent = ''; }
+    if (img) { img.hidden = true; }
+    if (hint) { hint.textContent = '正在取二维码（超星那边要 3~5 秒）…'; }
+    api('/api/cx/qr').then(function (d) {
+      if (!d || !d.ok || !d.uuid) {
+        if (hint) { hint.textContent = '取二维码失败'; }
+        if (msg) { msg.textContent = (d && d.error) || '请重试'; }
+        return;
+      }
+      QR.uuid = d.uuid;
+      if (img) {
+        // 图片单独请求，和轮询并行；不再等后端把图也取回来
+        img.src = d.img || ('/api/cx/qr/img?uuid=' + encodeURIComponent(d.uuid)
+                            + '&t=' + Date.now());
+        img.hidden = false;
+      }
+      if (hint) { hint.textContent = '打开手机学习通 → 右上角扫一扫'; }
+      QR.timer = setInterval(qrPoll, 2000);
+    }).catch(function (e) {
+      if (hint) { hint.textContent = '取二维码失败'; }
+      if (msg) { msg.textContent = String(e); }
+    });
+  }
+
+  function qrPoll() {
+    if (!QR.uuid) { qrStop(); return; }
+    api('/api/cx/qr/poll').then(function (d) {
+      var msg = $('cxQrMsg');
+      if (!d) { return; }
+      if (d.state === 'ok') {
+        qrStop();
+        QR.uuid = '';
+        // poll 的响应里已经带着登录态了，先用它把界面刷出来，
+        // 别指望 refresh() 那一趟——它没回来之前界面还是「未登录」。
+        if (d.loggedIn) {
+          S.loggedIn = true;
+          S.profile = d.profile || {};
+          S.error = '';
+        }
+        closeLogin();
+        paintState();
+        toast('学习通登录成功', 'ok');
+        refresh();       // 再异步拉一次全量（课程/签到列表）
+        doScan();
+        return;
+      }
+      if (d.state === 'scanned') {
+        if (msg) { msg.textContent = '已扫码，请在手机上点确认'; }
+        return;
+      }
+      if (d.state === 'fail' || d.state === 'error') {
+        qrStop();
+        QR.uuid = '';
+        if (msg) { msg.textContent = d.message || '登录失败，重新取一张'; }
+        return;
+      }
+      if (d.state === 'expired') {
+        // 码失效了不能干等：自动换一张，和手机上扫码 App 的行为一致
+        qrStop();
+        QR.uuid = '';
+        if (msg) { msg.textContent = '二维码已失效，正在换一张…'; }
+        setTimeout(qrFetch, 400);
+        return;
+      }
+    }).catch(function () { /* 轮询失败就等下一轮 */ });
+  }
+
   function openLogin() {
     if ($('cxLoginMsg')) { $('cxLoginMsg').textContent = ''; }
     if ($('cxLoginBackdrop')) { $('cxLoginBackdrop').classList.add('open'); }
-    var el = $('cxPhone');
-    if (el) { setTimeout(function () { el.focus(); }, 60); }
+    QR.uuid = '';
+    qrMode('qr');
   }
 
   function closeLogin() {
+    qrStop();
     if ($('cxLoginBackdrop')) { $('cxLoginBackdrop').classList.remove('open'); }
   }
 
@@ -848,6 +951,13 @@
     if ((el = $('cxLoginBtn'))) { el.addEventListener('click', openLogin); }
     if ((el = $('cxLoginCancel'))) { el.addEventListener('click', closeLogin); }
     if ((el = $('cxLoginSubmit'))) { el.addEventListener('click', submitLogin); }
+    if ((el = $('cxQrRefresh'))) { el.addEventListener('click', qrFetch); }
+    if ((el = $('cxQrImg'))) {
+      el.addEventListener('click', qrFetch);      // 码过期了点图换一张
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('.cx-login-tab'), function (b) {
+      b.addEventListener('click', function () { qrMode(b.getAttribute('data-mode')); });
+    });
     if ((el = $('cxPassword'))) {
       el.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { submitLogin(); }
