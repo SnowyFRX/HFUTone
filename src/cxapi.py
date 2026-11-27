@@ -400,6 +400,14 @@ class Cx:
                       'password': plain}
                 core.log('[学习通] 拿到 IM 账号' + ('（密码已解出）' if plain else '（密码未解出）'))
 
+        # 扫码登录拿到的用户信息经常不带 accountInfo，这里若无条件用 im 覆盖，
+        # 就会把之前存好的 IM 账号抹成空——群聊秒签从此失效，而且看不出哪里错。
+        if not im:
+            old = (self.store.get_user() or {}).get('imAccount') or {}
+            if isinstance(old, dict) and old.get('userName'):
+                im = old
+                core.log('[学习通] 本次响应没带 IM 账号，沿用上一次的')
+
         self.store.save_user({
             'uid': self.uid, 'name': self.name, 'school': self.school,
             'avatar': self.avatar, 'deviceInfo': self.device,
